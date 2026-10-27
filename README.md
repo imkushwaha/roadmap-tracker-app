@@ -59,15 +59,15 @@ Additional capabilities:
 
 ### Login
 
-![Login page](<img width="1586" height="938" alt="Image" src="https://github.com/user-attachments/assets/13d259eb-ca91-4031-8dc3-cf7eff77acfb" />)
+![Login page](<img width="1915" height="1079" alt="Image" src="https://github.com/user-attachments/assets/5e238a00-66b6-408d-b5bb-7ce5aae61ede" />)
 
 ### Dashboard (Home)
 
-![Dashboard](<img width="1621" height="946" alt="Image" src="https://github.com/user-attachments/assets/4d3af67d-78dd-48b7-ade5-02c3e993b0a0" />)
+![Dashboard](<img width="1915" height="1079" alt="Image" src="https://github.com/user-attachments/assets/4d3af67d-78dd-48b7-ade5-02c3e993b0a0" />)
 
 ### Timeline
 
-![Timeline view](<img width="1645" height="948" alt="Image" src="https://github.com/user-attachments/assets/053c5169-6824-4cbb-9862-e0300321897e" />)
+![Timeline view](<img width="1915" height="1079" alt="Image" src="https://github.com/user-attachments/assets/053c5169-6824-4cbb-9862-e0300321897e" />)
 
 ---
 
