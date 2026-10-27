@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: roadmap-dashboard
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DB_PATH
+        value: /data/app.db
+    disk:
+      name: sqlite-data
+      mountPath: /data
+      sizeGB: 1

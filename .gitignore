@@ -1,0 +1,9 @@
+node_modules/
+.env
+# SQLite database (+ WAL/SHM sidecar files) — never commit user data
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.sqlite*
+*.pyc
+__pycache__/

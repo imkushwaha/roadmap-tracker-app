@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Engineer Roadmap — Progress Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧭</text></svg>" />
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body class="locked">
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div id="authScreen" class="auth-screen hidden">
+  <form id="authForm" class="auth-card" novalidate>
+    <div class="auth-brand"><span aria-hidden="true">🧭</span> AI Engineer Roadmap</div>
+    <h2 id="authTitle">Log in</h2>
+    <p id="authNotice" class="auth-notice hidden"></p>
+    <div class="field">
+      <label for="authUsername">Username</label>
+      <input id="authUsername" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" />
+    </div>
+    <div class="field">
+      <label for="authPassword">Password</label>
+      <input id="authPassword" type="password" autocomplete="current-password" maxlength="72" />
+    </div>
+    <p id="authHint" class="auth-hint hidden">Username: 3–32 letters, numbers, _ or -. Password: at least 8 characters.</p>
+    <p id="authError" class="auth-error" role="alert"></p>
+    <button id="authSubmit" class="btn btn-primary auth-submit" type="submit">Log in</button>
+    <p class="auth-toggle"><span id="authToggleText">New here?</span> <button type="button" id="authToggle" class="link-btn">Create an account</button></p>
+    <button type="button" id="authDownload" class="link-btn hidden">⬇ Download my unsaved changes (JSON)</button>
+  </form>
+  <div id="authBlock" class="auth-card hidden">
+    <div class="auth-brand"><span aria-hidden="true">🧭</span> AI Engineer Roadmap</div>
+    <h2 id="authBlockTitle"></h2>
+    <p id="authBlockText" class="auth-notice"></p>
+    <div id="authBlockActions" class="modal-actions"></div>
+  </div>
+</div>
+
+<header class="app-header">
+  <div class="header-inner">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true">🧭</span>
+      <div>
+        <h1>AI Engineer Roadmap</h1>
+        <p class="subtitle">Tier-1 Production AI Engineer — 10-Month Execution Tracker</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="saveStatus" class="save-status" type="button" aria-live="polite"></button>
+      <span id="userChip" class="user-chip hidden" title=""><span aria-hidden="true">👤</span> <span id="userName" class="user-name"></span></span>
+      <button id="logoutBtn" class="btn-sm hidden" type="button">Log out</button>
+      <button id="searchToggle" class="icon-btn" title="Search" aria-label="Search">🔎</button>
+      <button id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+      <button id="dataMenuToggle" class="icon-btn" title="Data: export / import / reset" aria-label="Data menu">⋮</button>
+      <div id="dataMenu" class="dropdown-menu hidden">
+        <button id="startMonthBtn">📅 Set start month…</button>
+        <div class="dropdown-sep"></div>
+        <button id="exportBtn">⬇ Export progress (JSON)</button>
+        <button id="importBtn">⬆ Import progress (JSON)</button>
+        <button id="legacyImportBtn" class="hidden">🗂 Import old data from this browser…</button>
+        <input type="file" id="importFile" accept="application/json" class="hidden" />
+        <div class="dropdown-sep"></div>
+        <button id="resetBtn" class="danger">⟲ Reset progress…</button>
+      </div>
+    </div>
+  </div>
+  <div id="searchBar" class="search-bar hidden">
+    <input id="searchInput" type="search" placeholder="Search topics, tasks, notes…" aria-label="Search tasks" />
+    <button id="searchClose" class="icon-btn" aria-label="Close search">✕</button>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="overview">Overview</button>
+    <button class="tab" data-view="timeline">Timeline</button>
+    <button class="tab" data-view="kanban">Kanban</button>
+    <button class="tab" data-view="checklist">Checklist</button>
+    <button class="tab" data-view="thisweek">This Week</button>
+    <button class="tab" data-view="mastery">Skills Checklist</button>
+    <button class="tab" data-view="reference">Reference</button>
+  </nav>
+</header>
+
+<main id="main"></main>
+
+<div id="toastHost" class="toast-host" aria-live="polite"></div>
+<canvas id="confettiCanvas" aria-hidden="true"></canvas>
+
+<div id="modalHost" class="modal-host hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal" role="dialog" aria-modal="true"></div>
+</div>
+
+<script src="data/roadmap.js"></script>
+<script src="js/progress-schema.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

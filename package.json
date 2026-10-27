@@ -1,0 +1,26 @@
+{
+  "name": "roadmap-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Engineer roadmap progress dashboard with per-user login and SQLite persistence",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --watch server/index.js",
+    "start": "cross-env NODE_ENV=production node server/index.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "cookie-parser": "^1.4.7",
+    "cross-env": "^10.1.0",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3"
+  }
+}
