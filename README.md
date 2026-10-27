@@ -7,11 +7,12 @@ A single-page web application that converts `data/roadmap.md` (a structured 10-m
 ## Table of Contents
 
 1. [Features](#features)
-2. [Tech Stack](#tech-stack)
-3. [Requirements](#requirements)
-4. [Quick Start](#quick-start)
-5. [Project Structure](#project-structure)
-6. [Architecture & UML](#architecture--uml)
+2. [Screenshots](#screenshots)
+3. [Tech Stack](#tech-stack)
+4. [Requirements](#requirements)
+5. [Quick Start](#quick-start)
+6. [Project Structure](#project-structure)
+7. [Architecture & UML](#architecture--uml)
    - [System Context](#system-context)
    - [Component Diagram](#component-diagram)
    - [Module Dependency Graph](#module-dependency-graph)
@@ -19,15 +20,15 @@ A single-page web application that converts `data/roadmap.md` (a structured 10-m
    - [Auth Flow](#auth-flow--sequence-diagram)
    - [Data Save Flow](#data-save-flow--sequence-diagram)
    - [Python Parser Class Diagram](#python-parser-class-diagram)
-7. [Configuration](#configuration)
-8. [API Reference](#api-reference)
-9. [Security](#security)
-10. [Data Model](#data-model)
-11. [Running Tests](#running-tests)
-12. [Updating Roadmap Content](#updating-roadmap-content)
-13. [Deploying to Production](#deploying-to-production)
-14. [Code Architecture & Design Principles](#code-architecture--design-principles)
-15. [Browser Support](#browser-support)
+8. [Configuration](#configuration)
+9. [API Reference](#api-reference)
+10. [Security](#security)
+11. [Data Model](#data-model)
+12. [Running Tests](#running-tests)
+13. [Updating Roadmap Content](#updating-roadmap-content)
+14. [Deploying to Production](#deploying-to-production)
+15. [Code Architecture & Design Principles](#code-architecture--design-principles)
+16. [Browser Support](#browser-support)
 
 ---
 
@@ -49,6 +50,24 @@ Additional capabilities:
 - **Export / Import** progress as JSON
 - **Dark mode**, search, and a reset with confirmation
 - **Celebration** (confetti) when all tasks in a month are completed
+
+---
+
+## Screenshots
+
+> **How to add your URLs:** open a [new GitHub Issue](../../issues/new), drag each image file into the text box, wait for the upload to finish, then copy the generated URL (format: `https://github.com/<owner>/<repo>/assets/…`). Paste each one in place of the placeholder below and close the issue without submitting it.
+
+### Login
+
+![Login page](LOGIN_SCREENSHOT_URL_HERE)
+
+### Dashboard (Home)
+
+![Dashboard](DASHBOARD_SCREENSHOT_URL_HERE)
+
+### Timeline
+
+![Timeline view](TIMELINE_SCREENSHOT_URL_HERE)
 
 ---
 
