@@ -53,24 +53,6 @@ Additional capabilities:
 
 ---
 
-## Screenshots
-
-> **How to add your URLs:** open a [new GitHub Issue](../../issues/new), drag each image file into the text box, wait for the upload to finish, then copy the generated URL (format: `https://github.com/<owner>/<repo>/assets/…`). Paste each one in place of the placeholder below and close the issue without submitting it.
-
-### Login
-
-![Login page](<img width="1915" height="1079" alt="Image" src="https://github.com/user-attachments/assets/5e238a00-66b6-408d-b5bb-7ce5aae61ede" />)
-
-### Dashboard (Home)
-
-![Dashboard](<img width="1915" height="1079" alt="Image" src="https://github.com/user-attachments/assets/4d3af67d-78dd-48b7-ade5-02c3e993b0a0" />)
-
-### Timeline
-
-![Timeline view](<img width="1915" height="1079" alt="Image" src="https://github.com/user-attachments/assets/053c5169-6824-4cbb-9862-e0300321897e" />)
-
----
-
 ## Tech Stack
 
 | Layer | Technology |
