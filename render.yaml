@@ -2,6 +2,7 @@ services:
   - type: web
     name: roadmap-dashboard
     runtime: node
+    nodeVersion: "22.x"
     buildCommand: npm install
     startCommand: npm start
     envVars:
