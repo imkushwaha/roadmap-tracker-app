@@ -4,7 +4,7 @@
 
 The Roadmap Dashboard is a **10-month AI Engineer learning roadmap tracker**. It lets a registered user work through a structured curriculum (phases → sections → topics → subtasks), record their progress, add custom content, and visualise completion across multiple views. All progress data is stored on the server, tied to the authenticated user account, with optimistic concurrency control to handle multi-tab edits.
 
-The application is a **zero-build web app**: the frontend is plain HTML, CSS, and ES2022 JavaScript loaded directly by the browser. There is no compilation step, no bundler, and no frontend framework. The backend is an Express 5 server backed by a SQLite database.
+The application is a **zero-build web app**: the frontend is plain HTML, CSS, and ES2022 JavaScript loaded directly by the browser. There is no compilation step, no bundler, and no frontend framework. The backend is an Express 5 server backed by a Turso (hosted libSQL, SQLite-compatible) database.
 
 ---
 
@@ -32,7 +32,7 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 │                                                             │
 │  server/app.js           (createApp factory)                │
 │  server/config.js        (env-var loader)                   │
-│  server/db.js            (SQLite init)                      │
+│  server/db.js            (libSQL client + schema)           │
 │  ├── server/auth/                                           │
 │  │   ├── service.js      (bcrypt + JWT helpers)             │
 │  │   └── validators.js   (username/password rules)          │
@@ -43,9 +43,9 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 │  Static serving:                                            │
 │  index.html · css/ · js/ · data/roadmap.js  (allowlist)    │
 └──────────────────┬──────────────────────────────────────────┘
-                   │ better-sqlite3 (sync)
+                   │ @libsql/client (async, over the network)
 ┌──────────────────▼──────────────────────────────────────────┐
-│              SQLite — data/app.db                            │
+│     Turso (hosted libSQL) — TURSO_DATABASE_URL              │
 │  users        (id, username, password_hash, created_at)     │
 │  user_data    (user_id FK, data JSON, version, updated_at)  │
 └─────────────────────────────────────────────────────────────┘
@@ -55,8 +55,9 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 
 | Environment | Server | Database | Notes |
 |-------------|--------|----------|-------|
-| Development | `node server/index.js` :3000 | `data/app.db` | Random `SESSION_SECRET` on restart |
-| Production | Same Express process | Same SQLite file | `SESSION_SECRET` required; `COOKIE_SECURE=true` |
+| Development | `node server/index.js` :3000 | Local file `data/app.db` (or a Turso URL if `TURSO_DATABASE_URL` is set) | Random `SESSION_SECRET` on restart |
+| Test | In-process, ephemeral port | `:memory:` libSQL | Fresh database per server |
+| Production (Render) | Express web service (`render.yaml`) | Turso, via `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` | `SESSION_SECRET` required; `COOKIE_SECURE=true`; no persistent disk needed |
 
 ---
 
@@ -80,7 +81,7 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 | `server/index.js` | Entry point — calls `createApp`, binds port, sets up graceful shutdown |
 | `server/app.js` | `createApp(db, sessionSecret, opts)` — pure factory, fully testable |
 | `server/config.js` | `loadConfig()` — reads env vars, validates required keys, returns config object |
-| `server/db.js` | Opens/initialises SQLite (WAL mode, FK on), runs DDL |
+| `server/db.js` | `openDb(url, authToken)` (async) — creates the libSQL client and applies the schema via `batch` |
 | `server/auth/service.js` | `hashPassword`, `verifyPassword`, `signToken`, `verifyToken`, cookie options |
 | `server/auth/validators.js` | `validateUsername`, `validatePassword` — returns error strings or null |
 | `server/routes/auth.js` | Handles `/api/auth/register`, `/login`, `/logout`, `/me` |
@@ -189,8 +190,8 @@ The browser loads `data/roadmap.js` as a `<script>` tag. `app.js` reads `window.
 | JWT in httpOnly cookies | Immune to XSS-based token theft; rolling sessions keep UX seamless |
 | JSON blob for progress data | Schema flexibility; user additions (custom phases/topics) fit naturally; avoids N+1 DB rows |
 | Optimistic concurrency (compare-and-swap) | Safe multi-tab editing without locking; conflict surfaced transparently to user |
-| SQLite over PostgreSQL | Single-user app (one user's data); zero infrastructure; file is portable |
-| `createApp` factory pattern | Enables unit-testable Express app; tests inject in-memory DB and ephemeral port |
+| Turso (hosted libSQL) over a local SQLite file or PostgreSQL | SQLite-compatible SQL, so the schema and queries are unchanged; data survives redeploys on Render's ephemeral filesystem without a paid disk; free tier is ample for ~10–20 users. Trade-offs: a network round trip per query, an external dependency with credentials to manage, and free-tier usage limits |
+| `createApp` factory pattern | Enables unit-testable Express app; tests inject an in-memory DB and ephemeral port |
 | Shared UMD validator | Server validates before writing; browser validates on import — single source of truth for the ProgressStore shape |
-| Static file allowlist | Server never accidentally leaks `.env`, `server/`, `data/app.db` or `node_modules/` |
+| Static file allowlist | Server never accidentally leaks `.env`, `server/`, the local `data/app.db` or `node_modules/` |
 | Python parser for roadmap | Keeps curriculum authoring in familiar Markdown; generated JS committed so Python not needed at runtime |

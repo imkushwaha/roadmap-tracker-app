@@ -49,7 +49,10 @@ describe("auth flow", () => {
   test("passwords are stored hashed, never plaintext", async () => {
     const c = client(srv.base);
     await c.post("/api/auth/register", creds("hashcheck", "my-secret-pass"));
-    const row = srv.db.prepare("SELECT password_hash FROM users WHERE username = ?").get("hashcheck");
+    const { rows: [row] } = await srv.db.execute({
+      sql: "SELECT password_hash FROM users WHERE username = ?",
+      args: ["hashcheck"],
+    });
     assert.match(row.password_hash, /^\$2[aby]\$/);
     assert.ok(!row.password_hash.includes("my-secret-pass"));
   });
@@ -256,7 +259,7 @@ describe("cross-user isolation", () => {
     assert.deepEqual((await b.get("/api/data")).body.data, bData);
 
     // The user id can't be smuggled in via query string, body, or headers
-    const aId = srv.db.prepare("SELECT id FROM users WHERE username='iso_a'").get().id;
+    const aId = (await srv.db.execute("SELECT id FROM users WHERE username='iso_a'")).rows[0].id;
     const sneaky = await b.request("PUT", `/api/data?user_id=${aId}&userId=${aId}`,
       { data: sampleData({ counters: { "counter-dsa": 666 } }), version: 1, user_id: aId, userId: aId },
       { "x-user-id": String(aId) });
@@ -265,8 +268,8 @@ describe("cross-user isolation", () => {
     assert.equal((await b.get("/api/data")).body.data.counters["counter-dsa"], 666);
 
     // Straight from the DB: exactly one row each, matching their own data
-    const rows = srv.db.prepare(
-      "SELECT u.username, d.data FROM user_data d JOIN users u ON u.id = d.user_id WHERE u.username IN ('iso_a','iso_b') ORDER BY u.username").all();
+    const { rows } = await srv.db.execute(
+      "SELECT u.username, d.data FROM user_data d JOIN users u ON u.id = d.user_id WHERE u.username IN ('iso_a','iso_b') ORDER BY u.username");
     assert.equal(rows.length, 2);
     assert.equal(JSON.parse(rows[0].data).counters["counter-dsa"], 111);
     assert.equal(JSON.parse(rows[1].data).counters["counter-dsa"], 666);
@@ -286,9 +289,10 @@ describe("cross-user isolation", () => {
     const c = client(srv.base);
     await c.post("/api/auth/register", creds("cascade"));
     await c.put("/api/data", { data: sampleData(), version: 0 });
-    const id = srv.db.prepare("SELECT id FROM users WHERE username='cascade'").get().id;
-    srv.db.prepare("DELETE FROM users WHERE id = ?").run(id);
-    assert.equal(srv.db.prepare("SELECT COUNT(*) n FROM user_data WHERE user_id = ?").get(id).n, 0);
+    const id = (await srv.db.execute("SELECT id FROM users WHERE username='cascade'")).rows[0].id;
+    await srv.db.execute({ sql: "DELETE FROM users WHERE id = ?", args: [id] });
+    const left = await srv.db.execute({ sql: "SELECT COUNT(*) n FROM user_data WHERE user_id = ?", args: [id] });
+    assert.equal(left.rows[0].n, 0);
     assert.equal((await c.get("/api/auth/me")).status, 401); // token for a deleted user is dead
   });
 });

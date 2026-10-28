@@ -18,7 +18,7 @@ const { COOKIE_NAME, createRequireAuth } = require("./auth/service");
 
 /**
  * @typedef {object} AppOptions
- * @property {import('better-sqlite3').Database} db
+ * @property {import('@libsql/client').Client} db
  * @property {string} sessionSecret
  * @property {boolean} [cookieSecure] - Set the `Secure` flag on session cookies.
  * @property {boolean|string|number} [trustProxy] - Passed to Express `trust proxy`.
@@ -50,16 +50,12 @@ function createApp({
   app.disable("x-powered-by");
   if (trustProxy) app.set("trust proxy", trustProxy);
 
-  // One shared prepared statement used by both the auth router's /me endpoint
-  // and the requireAuth middleware passed to the data router.
-  const userByIdStmt = db.prepare("SELECT id, username FROM users WHERE id = ?");
-  const requireAuth = createRequireAuth(userByIdStmt, sessionSecret);
+  const requireAuth = createRequireAuth(db, sessionSecret);
 
   _applyMiddleware(app, bodyLimit);
 
   app.use("/api/auth", createAuthRouter({
     db,
-    userByIdStmt,
     secret: sessionSecret,
     cookieSecure,
     bcryptCost,

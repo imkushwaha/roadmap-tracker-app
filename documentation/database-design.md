@@ -2,13 +2,16 @@
 
 ## 1. Overview
 
-The application uses **SQLite** via the `better-sqlite3` library (synchronous API). The database file is `data/app.db`, created in the `data/` directory on first server start. Configuration can override the path via `DB_PATH` env var (use `:memory:` for tests).
+The application uses **[Turso](https://turso.tech)** (hosted libSQL, a SQLite-compatible database) via the `@libsql/client` library. The client API is **async**: every query is `await db.execute({ sql, args })` with parameterised `args` (there are no prepared statements). Because the data lives in Turso rather than on the web server's disk, it survives redeploys on hosts with an ephemeral filesystem such as Render.
 
-**SQLite options applied at startup:**
-- `PRAGMA journal_mode = WAL` — write-ahead logging for concurrent reads
-- `PRAGMA foreign_keys = ON` — enforce FK constraints
+**Connection targets** (selected by `TURSO_DATABASE_URL`):
+- `libsql://<db>.turso.io` — Turso, used in production (requires `TURSO_AUTH_TOKEN`)
+- `file:<path>` — local SQLite file; the development default is `./data/app.db` when no URL is set
+- `:memory:` — in-process database used by the test suite
 
-Schema is created with `CREATE TABLE IF NOT EXISTS` guards, making the file safe to delete and regenerate. All timestamps are stored as ISO-8601 text (`YYYY-MM-DDTHH:MM:SS.sssZ`).
+**Startup:** `openDb(url, authToken)` (async) creates the client and applies the schema in one call, `client.batch(SCHEMA_STATEMENTS, "write")`. No `PRAGMA journal_mode` is set by the application (journaling is managed by libSQL/Turso). Foreign-key constraints are enforced by libSQL by default; the test suite verifies this through the `ON DELETE CASCADE` test.
+
+Schema is created with `CREATE TABLE IF NOT EXISTS` guards, so startup is idempotent. All timestamps are stored as ISO-8601 text (`YYYY-MM-DDTHH:MM:SS.sssZ`).
 
 ---
 
@@ -160,28 +163,22 @@ SELECT * FROM users WHERE username = ? COLLATE NOCASE;
 ```
 The `COLLATE NOCASE` on the column definition makes this implicitly case-insensitive.
 
-### Upsert user data (first save vs. update)
-The `PUT /api/data` route uses an `IMMEDIATE` transaction for atomic compare-and-swap:
+### Save user data (first save vs. update)
+The `PUT /api/data` route performs an atomic compare-and-swap using a **single statement** (no explicit transaction), so it costs one network round trip to Turso. The statement depends on the client's version:
 
 ```sql
-BEGIN IMMEDIATE;
-
--- Read current state
-SELECT version FROM user_data WHERE user_id = ?;
-
--- If version matches client version:
+-- clientVersion = 0: first save (no row yet)
 INSERT INTO user_data (user_id, data, version, updated_at)
 VALUES (?, ?, 1, ?)
-ON CONFLICT(user_id) DO UPDATE
-  SET data = excluded.data,
-      version = version + 1,
-      updated_at = excluded.updated_at
-WHERE version = ?;          -- the CAS guard
+ON CONFLICT(user_id) DO NOTHING;
 
-COMMIT;
+-- clientVersion > 0: update only if the stored version still matches
+UPDATE user_data
+   SET data = ?, version = version + 1, updated_at = ?
+ WHERE user_id = ? AND version = ?;      -- the CAS guard
 ```
 
-If `changes = 0` after the UPDATE, the transaction was a no-op because the version didn't match — the route returns **409 Conflict** with the server's current copy.
+If `rowsAffected === 1` the save succeeded and the new version is `clientVersion + 1`. Otherwise the version didn't match (or a row already exists for a version-0 insert), so the route re-reads the row and returns **409 Conflict** with the server's current copy.
 
 ### Fetch user progress
 ```sql
@@ -196,7 +193,9 @@ Returns `null` data for a new user (no row yet) — represented as `{ data: null
 - `password_hash` is stored as a bcrypt `$2b$12$...` string (cost factor 12 default). The plain-text password never touches the database.
 - The `data` column is validated by `validateProgress()` before every write. Malformed JSON or invalid schema causes a **400** and is never written.
 - `ON DELETE CASCADE` ensures no orphaned `user_data` rows if a user is ever removed.
-- The SQLite file (`data/app.db`) is **not served** by the static file allowlist and returns 404 if requested directly.
+- The local development file (`data/app.db`) is **not served** by the static file allowlist and returns 404 if requested directly.
+- `TURSO_AUTH_TOKEN` grants full access to the database. Keep it in `.env` (git-ignored) or the host's secret store; never commit it.
+- All queries use parameterised `args`, never string concatenation. Duplicate usernames are detected via `isUniqueViolation` (error code `SQLITE_CONSTRAINT_UNIQUE` or a message containing `UNIQUE constraint failed`) and mapped to 409.
 
 ---
 
@@ -204,4 +203,5 @@ Returns `null` data for a new user (no row yet) — represented as `{ data: null
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `DB_PATH` | `./data/app.db` | Path to SQLite file; use `:memory:` for in-process tests |
+| `TURSO_DATABASE_URL` | dev: local file `./data/app.db`; **required in production** | `libsql://…` Turso URL (or `file:` / `:memory:`); tests use `:memory:` |
+| `TURSO_AUTH_TOKEN` | empty | Turso auth token; required when the URL is remote (`libsql://`) in production |

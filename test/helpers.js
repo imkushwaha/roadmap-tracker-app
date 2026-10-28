@@ -14,10 +14,10 @@ const SECRET = "test-secret-test-secret-test-secret-123456";
  * Boot a real HTTP server on an ephemeral port backed by an in-memory database.
  *
  * @param {Partial<import('../server/app').AppOptions>} [overrides]
- * @returns {Promise<{ db: import('better-sqlite3').Database, base: string, close: () => Promise<void> }>}
+ * @returns {Promise<{ db: import('@libsql/client').Client, base: string, close: () => Promise<void> }>}
  */
 async function startServer(overrides = {}) {
-  const db = overrides.db || openDb(":memory:");
+  const db = overrides.db || await openDb(":memory:");
   const app = createApp({
     db,
     sessionSecret: SECRET,

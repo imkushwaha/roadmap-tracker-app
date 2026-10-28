@@ -254,7 +254,7 @@ These paths serve the application assets. They are an explicit allowlist — all
 | `GET /js/*` | JS files | All files under `js/` |
 | `GET /data/roadmap.js` | Static roadmap data | `window.ROADMAP_DATA = {...}` |
 | Any other `/api/*` | `404 { "error": "Not found" }` | |
-| Everything else | `404` | `data/app.db`, `.env`, `server/`, `node_modules/` are never served |
+| Everything else | `404` | `data/app.db` (local dev file), `.env`, `server/`, `node_modules/` are never served |
 
 ---
 
@@ -283,14 +283,14 @@ Client                          Server
   │                               │
   │ PUT { data, version: N }      │
   ├──────────────────────────────►│
-  │                               │ BEGIN IMMEDIATE transaction
-  │                               │ SELECT version WHERE user_id = ?
-  │                               │ if server.version != N:
-  │◄──────────────────────────────┤   409 { error, server: { data, version } }
-  │                               │ else:
-  │                               │   UPSERT version = N+1
+  │                               │ single atomic statement:
+  │                               │   N = 0: INSERT ... ON CONFLICT DO NOTHING
+  │                               │   N > 0: UPDATE ... WHERE version = N
+  │                               │ if rowsAffected == 1:
   │◄──────────────────────────────┤   200 { version: N+1, updatedAt }
-  │                               │ COMMIT
+  │                               │ else (version mismatch):
+  │                               │   re-read current row
+  │◄──────────────────────────────┤   409 { error, server: { data, version } }
 ```
 
 On 409, `app.js` opens a modal presenting the user with two options:

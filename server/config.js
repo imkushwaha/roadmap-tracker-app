@@ -15,7 +15,8 @@ const PROJECT_ROOT = path.resolve(__dirname, "..");
  * @typedef {object} AppConfig
  * @property {boolean} isProduction
  * @property {string} sessionSecret
- * @property {string} dbPath
+ * @property {string} dbUrl - `libsql://…`, `file:…` or `:memory:`.
+ * @property {string} dbAuthToken - Turso auth token (empty for local targets).
  * @property {number} port
  * @property {boolean} cookieSecure
  * @property {boolean|string|number} trustProxy
@@ -34,7 +35,8 @@ function loadConfig(env = process.env) {
   return {
     isProduction,
     sessionSecret: _resolveSessionSecret(env, isProduction),
-    dbPath: _resolveDbPath(env),
+    dbUrl: _resolveDbUrl(env, isProduction),
+    dbAuthToken: env.TURSO_AUTH_TOKEN || "",
     port: Number(env.PORT) || 3000,
     cookieSecure: _resolveCookieSecure(env, isProduction),
     trustProxy: _parseTrustProxy(env.TRUST_PROXY),
@@ -67,14 +69,25 @@ function _resolveSessionSecret(env, isProduction) {
 }
 
 /**
- * Resolve the database file path, defaulting to `./data/app.db` relative to
- * the project root. Passes through `":memory:"` unchanged.
+ * Resolve the database URL. Production requires `TURSO_DATABASE_URL` (and a
+ * token for remote `libsql://` URLs). In development it defaults to a local
+ * SQLite file at `./data/app.db` so `npm run dev` works without Turso.
  * @param {NodeJS.ProcessEnv} env
+ * @param {boolean} isProduction
  * @returns {string}
  */
-function _resolveDbPath(env) {
-  const raw = env.DB_PATH || "./data/app.db";
-  return raw === ":memory:" ? raw : path.resolve(PROJECT_ROOT, raw);
+function _resolveDbUrl(env, isProduction) {
+  const url = env.TURSO_DATABASE_URL;
+  if (!url) {
+    if (isProduction) {
+      throw new Error("TURSO_DATABASE_URL is required when NODE_ENV=production (see .env.example).");
+    }
+    return "file:" + path.resolve(PROJECT_ROOT, "data", "app.db");
+  }
+  if (isProduction && /^(libsql|wss?|https?):/.test(url) && !env.TURSO_AUTH_TOKEN) {
+    throw new Error("TURSO_AUTH_TOKEN is required for a remote TURSO_DATABASE_URL.");
+  }
+  return url;
 }
 
 /**

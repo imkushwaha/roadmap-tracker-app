@@ -25,9 +25,20 @@ const RATE_LIMIT_MESSAGE = {
 };
 
 /**
+ * Whether *err* is a SQLite unique-constraint violation (local or Turso).
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isUniqueViolation(err) {
+  return (
+    err?.code === "SQLITE_CONSTRAINT_UNIQUE" ||
+    /UNIQUE constraint failed/i.test(err?.message ?? "")
+  );
+}
+
+/**
  * @typedef {object} AuthRouterOptions
- * @property {import('better-sqlite3').Database} db
- * @property {import('better-sqlite3').Statement} userByIdStmt - Shared prepared statement.
+ * @property {import('@libsql/client').Client} db
  * @property {string} secret - JWT signing secret.
  * @property {boolean} [cookieSecure] - Whether to set the `Secure` cookie flag.
  * @property {number} [bcryptCost] - bcrypt cost factor.
@@ -41,18 +52,12 @@ const RATE_LIMIT_MESSAGE = {
  */
 function createAuthRouter({
   db,
-  userByIdStmt,
   secret,
   cookieSecure = false,
   bcryptCost = 12,
   rateLimitConfig = { windowMs: 15 * 60 * 1000, max: 10 },
 }) {
   const router = express.Router();
-
-  const q = {
-    userByName: db.prepare("SELECT id, username, password_hash FROM users WHERE username = ?"),
-    insertUser: db.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)"),
-  };
 
   const dummyHash = computeDummyHash(bcryptCost);
   const opts = () => buildCookieOptions(cookieSecure, SESSION_DAYS);
@@ -85,9 +90,13 @@ function createAuthRouter({
     const hash = await hashPassword(password, bcryptCost);
     let id;
     try {
-      id = q.insertUser.run(username, hash).lastInsertRowid;
+      const result = await db.execute({
+        sql: "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+        args: [username, hash],
+      });
+      id = result.lastInsertRowid;
     } catch (e) {
-      if (e?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      if (isUniqueViolation(e)) {
         return res.status(409).json({ error: "That username is already taken." });
       }
       throw e;
@@ -107,11 +116,15 @@ function createAuthRouter({
     ) {
       return invalid();
     }
-    const row = q.userByName.get(username);
+    const found = await db.execute({
+      sql: "SELECT id, username, password_hash FROM users WHERE username = ?",
+      args: [username],
+    });
+    const row = found.rows[0];
     const ok = await verifyPassword(password, row ? row.password_hash : dummyHash);
     if (!row || !ok) return invalid();
-    issueSession(res, row);
-    res.json({ user: { username: row.username } });
+    issueSession(res, { id: Number(row.id), username: String(row.username) });
+    res.json({ user: { username: String(row.username) } });
   });
 
   router.post("/logout", (_req, res) => {
@@ -120,8 +133,8 @@ function createAuthRouter({
     res.status(204).end();
   });
 
-  router.get("/me", (req, res) => {
-    const user = getCurrentUser(req, userByIdStmt, secret);
+  router.get("/me", async (req, res) => {
+    const user = await getCurrentUser(req, db, secret);
     if (!user) return res.status(401).json({ error: "Not authenticated" });
     issueSession(res, user); // rolling session: active users stay logged in
     res.json({ user: { username: user.username } });

@@ -6,7 +6,7 @@
 |-------|-----------|---------|------------|
 | **Runtime** | Node.js | ≥ 22 | Built-in `node:test` module; modern ESM; stable LTS |
 | **Web framework** | Express | 5.x | Minimal, well-understood; v5 is async-error-friendly |
-| **Database** | SQLite (`better-sqlite3`) | — | Zero infrastructure; single-file; sync API fits Express well |
+| **Database** | Turso (hosted libSQL) via `@libsql/client` | — | SQLite-compatible SQL; data persists across redeploys on ephemeral hosts (Render) with no paid disk; async API fits Express 5 |
 | **Auth** | `jsonwebtoken` + `bcryptjs` | — | Industry-standard JWT + constant-time password hashing |
 | **Security** | `helmet` + `express-rate-limit` | — | CSP headers + brute-force protection out of the box |
 | **Frontend** | Vanilla JS (ES2022), HTML5, CSS3 | — | No build step; loads instantly; anyone can contribute |
@@ -23,7 +23,7 @@
 ```
 roadmap-dashboard/
 ├── css/            ← All styles in one file (styles.css)
-├── data/           ← Static roadmap content + SQLite file (git-ignored)
+├── data/           ← Static roadmap content (+ local dev SQLite file, git-ignored)
 ├── js/             ← Frontend scripts loaded by index.html
 ├── scripts/        ← Developer tooling (Python parser — not a runtime dep)
 ├── server/         ← All backend code
@@ -41,7 +41,7 @@ roadmap-dashboard/
 
 ### Module Exports
 
-- Server modules use CommonJS (`require`/`module.exports`) — consistent with `better-sqlite3` and `jsonwebtoken`
+- Server modules use CommonJS (`require`/`module.exports`) — consistent with `@libsql/client` and `jsonwebtoken`
 - Frontend JS is plain script files (no `import`/`export`) loaded via `<script>` tags in order
 - `js/progress-schema.js` uses a UMD wrapper to work in both environments
 
@@ -70,7 +70,8 @@ cp .env.example .env
 # 3. Start server
 npm start
 # Server starts on http://localhost:3000
-# SQLite DB created at data/app.db on first start
+# With TURSO_DATABASE_URL unset, a local SQLite DB is created at data/app.db on first start.
+# To develop against Turso instead, set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in .env.
 
 # 4. Run tests
 npm test
@@ -81,7 +82,8 @@ npm test
 | Variable | Dev Default | Prod Required | Description |
 |----------|-------------|---------------|-------------|
 | `SESSION_SECRET` | random (auto-generated) | Yes (≥ 32 chars) | JWT signing key |
-| `DB_PATH` | `./data/app.db` | No | SQLite file path; `:memory:` for tests |
+| `TURSO_DATABASE_URL` | local file `./data/app.db` | **Yes** | Turso `libsql://…` URL (`turso db show <name> --url`); tests use `:memory:` |
+| `TURSO_AUTH_TOKEN` | empty | Yes, for a remote `libsql://` URL | Turso auth token (`turso db tokens create <name>`); keep secret |
 | `PORT` | `3000` | No | HTTP listen port |
 | `NODE_ENV` | — | `production` | Enables production safety checks |
 | `TRUST_PROXY` | `false` | No | Number of reverse-proxy hops (for rate-limit real-IP) |
@@ -123,7 +125,7 @@ This overwrites `data/roadmap.json` and `data/roadmap.js`. Commit both generated
 ### Input Validation
 
 - `validateUsername` / `validatePassword` validate auth inputs before any DB touch.
-- `validateProgress` (shared UMD) validates the full `ProgressStore` shape before every `PUT /api/data` write. Invalid data is rejected with a descriptive 400 before it can reach SQLite.
+- `validateProgress` (shared UMD) validates the full `ProgressStore` shape before every `PUT /api/data` write. Invalid data is rejected with a descriptive 400 before it can reach the database.
 - Body size limit of **5 MB** on `PUT /api/data` prevents DoS via large payloads.
 
 ### File Serving Allowlist
@@ -142,7 +144,7 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 
 ### Optimistic Concurrency Control
 
-`PUT /api/data` runs in an `IMMEDIATE` SQLite transaction that atomically reads and conditionally updates the `version` column. If the client's version doesn't match the server's (e.g. another browser tab saved first), the transaction aborts and returns 409. This prevents silent data loss without needing pessimistic locking.
+`PUT /api/data` performs a single-statement compare-and-swap: `UPDATE … WHERE user_id = ? AND version = ?` (or `INSERT … ON CONFLICT DO NOTHING` for a first save). The write only lands if the stored `version` still matches the client's; otherwise zero rows are affected and the route re-reads the server copy and returns 409 (e.g. another browser tab saved first). This prevents silent data loss without pessimistic locking or a multi-statement transaction (one network round trip to Turso).
 
 ### Autosave Resilience
 
@@ -153,8 +155,8 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 
 ### Database
 
-- **WAL mode** allows reads to proceed concurrently with a write (relevant if multiple request handlers query SQLite at the same time).
-- **Foreign keys enabled** ensures `user_data.user_id` always references a real `users.id`.
+- **Durable hosted storage**: data lives in Turso, not on the web server's disk, so redeploys and restarts on Render do not wipe users or progress.
+- **Foreign keys enforced** (libSQL default; verified by the cascade test) ensures `user_data.user_id` always references a real `users.id`.
 - **`ON DELETE CASCADE`** means deleting a user cleans up their data row atomically.
 
 ---
@@ -163,7 +165,7 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 
 ### Philosophy
 
-Tests are **integration-first**: most of the test suite exercises real HTTP requests against a real Express app backed by an in-memory SQLite database. This catches the full request → middleware → route → DB → response cycle without mocking.
+Tests are **integration-first**: most of the test suite exercises real HTTP requests against a real Express app backed by an in-memory libSQL database (`:memory:`, no Turso credentials needed). This catches the full request → middleware → route → DB → response cycle without mocking.
 
 Unit tests target the two pure, stateless modules: `loadConfig` and `validateProgress`.
 
@@ -203,7 +205,7 @@ npm test
 
 ### Server-Side
 
-- **No ORM**: raw SQL via `better-sqlite3`'s prepared statements. Prepared statements prevent SQL injection; synchronous API keeps code simple.
+- **No ORM**: raw SQL via `@libsql/client`'s `db.execute({ sql, args })`. Parameterised `args` prevent SQL injection; the API is async, so route handlers `await` queries (Express 5 forwards rejected promises to the error handler).
 - **No global state**: `db` and `sessionSecret` flow through `createApp` and into route handlers via closure — no module-level singletons.
 - **Explicit error handling**: every route has a try/catch that returns a structured `{ error }` JSON response.
 
@@ -219,7 +221,7 @@ npm test
 
 | Limitation | Impact | Possible Improvement |
 |------------|--------|----------------------|
-| SQLite (single writer) | Negligible at single-user scale; write lock blocks concurrent writes | Migrate to PostgreSQL for multi-user teams |
+| Turso free tier + network hop | Each query is a network round trip; depends on an external service and its credentials; free-tier usage limits apply (ample for ~10–20 users) | Co-locate the Render region with the Turso region; move to a paid Turso plan or PostgreSQL if usage grows |
 | JWT in cookie (no blacklist) | Logout clears cookie but issued token remains valid until expiry if intercepted | Add a token revocation table or use short-lived tokens |
 | No pagination on data read | `user_data.data` JSON blob grows with roadmap size | Already bounded by 5 MB limit; current roadmap is well under |
 | `js/app.js` is a monolith (~1961 lines) | Harder to navigate; no tree-shaking | Split into view modules (refactor plan drafted in `.claude/code-refactor-plan.md`) |

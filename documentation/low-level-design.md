@@ -43,10 +43,10 @@ roadmap-dashboard/
 
 **Responsibilities:**
 1. Call `loadConfig()` to read and validate env vars
-2. Call `openDb(config.dbPath)` to initialise SQLite
+2. `await openDb(config.dbUrl, config.dbAuthToken)` to connect to Turso and apply the schema (startup runs inside an async `main()`; a startup failure logs the error and exits with code 1)
 3. Call `createApp(db, config.sessionSecret, opts)` to build the Express app
 4. `app.listen(port)` — bind HTTP server
-5. Register `SIGTERM`/`SIGINT` handlers for graceful shutdown (close DB connection, stop HTTP server)
+5. Register `SIGTERM`/`SIGINT` handlers for graceful shutdown (stop HTTP server, then `db.close()`)
 
 ---
 
@@ -67,7 +67,7 @@ Static allowlist                — index.html, css/, js/, data/roadmap.js
 404 handler                     — all other paths return { error: 'Not found' }
 ```
 
-**Why factory pattern:** Tests inject `db` as an in-memory SQLite instance and bind to port 0 (ephemeral). No global singletons.
+**Why factory pattern:** Tests inject `db` as an in-memory libSQL client (`openDb(":memory:")`) and bind to port 0 (ephemeral). No global singletons.
 
 ---
 
@@ -78,7 +78,8 @@ Static allowlist                — index.html, css/, js/, data/roadmap.js
 ```js
 Config {
   port: number,
-  dbPath: string,
+  dbUrl: string,          // libsql://… | file:… | :memory:
+  dbAuthToken: string,    // Turso token ('' for local targets)
   sessionSecret: string,
   cookieSecure: boolean,
   trustProxy: number | boolean,
@@ -86,35 +87,34 @@ Config {
 }
 ```
 
-In production (`NODE_ENV=production`), throws if `SESSION_SECRET` is missing or shorter than 32 characters. In development, generates a random secret (sessions reset on restart).
+In production (`NODE_ENV=production`), throws if `SESSION_SECRET` is missing or shorter than 32 characters, if `TURSO_DATABASE_URL` is missing, or if the URL is remote (`libsql:`, `wss:`, `https:` …) and `TURSO_AUTH_TOKEN` is missing. In development, generates a random secret (sessions reset on restart) and, when `TURSO_DATABASE_URL` is unset, falls back to a local file `file:<project>/data/app.db`.
 
 ---
 
 ### 2.4 `server/db.js` — Database Module
 
-**Export:** `openDb(path) → Database`
+**Export:** `openDb(url, authToken) → Promise<Client>`
 
 ```js
-openDb(path) {
-  db = new Database(path)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-  db.exec(/* CREATE TABLE IF NOT EXISTS users ... */)
-  db.exec(/* CREATE TABLE IF NOT EXISTS user_data ... */)
-  return db
+async openDb(url, authToken) {
+  client = createClient({ url, authToken: authToken || undefined })   // @libsql/client
+  await client.batch(SCHEMA_STATEMENTS, 'write')   // CREATE TABLE IF NOT EXISTS users / user_data
+  return client
 }
 ```
 
-All callers receive the same `better-sqlite3` `Database` instance. Synchronous API means all SQL runs on the event loop — acceptable because SQLite with WAL has negligible contention for this single-user workload.
+All callers receive the same `@libsql/client` `Client`. Queries are async and parameterised: `await db.execute({ sql, args })` returns `{ rows, rowsAffected, lastInsertRowid }`; numeric columns arrive as JS numbers, `lastInsertRowid` as a `BigInt`. There are no prepared statements, and no `PRAGMA` calls — libSQL enforces foreign keys by default (covered by the `ON DELETE CASCADE` test). Each query is a network round trip to Turso (for `libsql://` URLs), so handlers avoid redundant queries; the data write is a single statement for that reason.
 
 ---
 
 ### 2.5 `server/auth/service.js` — Auth Service
 
-**Exports:** pure functions, no side effects, no DB access.
+**Exports:** crypto/JWT helpers, plus the session-lookup helpers `getCurrentUser` and `createRequireAuth`, which are the only functions here that touch the DB (async, via `db.execute`).
 
 | Function | Signature | Notes |
 |----------|-----------|-------|
+| `getCurrentUser` | `async (req, db, secret) → { id, username } \| null` | Verifies the cookie JWT, then `SELECT id, username FROM users WHERE id = ?` |
+| `createRequireAuth` | `(db, secret) → async middleware` | Sets `req.user`, or responds 401; DB errors are passed to `next(err)` |
 | `hashPassword` | `(password) → Promise<hash>` | `bcrypt.hash(password, ROUNDS)` |
 | `verifyPassword` | `(password, hash) → Promise<bool>` | `bcrypt.compare(...)` |
 | `signToken` | `(payload, secret) → string` | `jwt.sign({ sub, un }, secret, { expiresIn: '7d' })` |
@@ -149,25 +149,27 @@ validatePassword(password)
 ```
 1. validateUsername(body.username)  → 400 if error
 2. validatePassword(body.password)  → 400 if error
-3. db.prepare('SELECT id FROM users WHERE username = ?').get(username)
-   If found → 409 "Username already taken"
-4. hashPassword(password) → hash
-5. db.prepare('INSERT INTO users (username, password_hash) VALUES (?,?)').run(username, hash)
-6. signToken({ sub: id, un: username }, sessionSecret)
-7. res.cookie('rd_session', token, cookieOptions(secure))
-8. 201 { user: { username } }
+3. hashPassword(password) → hash
+4. await db.execute({ sql: 'INSERT INTO users (username, password_hash) VALUES (?, ?)', args: [username, hash] })
+   → id = result.lastInsertRowid
+   If isUniqueViolation(err) (code SQLITE_CONSTRAINT_UNIQUE or message "UNIQUE constraint failed")
+   → 409 "That username is already taken."   (username is UNIQUE COLLATE NOCASE; any other error is rethrown)
+5. signToken({ sub: Number(id), un: username }, sessionSecret)
+6. res.cookie('rd_session', token, cookieOptions(secure))
+7. 201 { user: { username } }
 ```
 
 #### POST `/login`
 
 ```
-1. db.prepare('SELECT * FROM users WHERE username = ?').get(username)
+1. await db.execute({ sql: 'SELECT id, username, password_hash FROM users WHERE username = ?', args: [username] })
+   → row = result.rows[0]
    If not found:
      verifyPassword(password, DUMMY_HASH)  // anti-timing
      → 401 "Invalid credentials"
-2. verifyPassword(password, user.password_hash)
+2. verifyPassword(password, row.password_hash)
    If false → 401 "Invalid credentials"
-3. signToken({ sub: user.id, un: user.username }, sessionSecret)
+3. signToken({ sub: Number(row.id), un: row.username }, sessionSecret)
 4. res.cookie('rd_session', token, cookieOptions(secure))
 5. 200 { user: { username } }
 ```
@@ -184,7 +186,7 @@ validatePassword(password)
 ```
 1. requireAuth middleware:
      verifyToken(req.cookies.rd_session, sessionSecret) → { sub, un }
-     db.prepare('SELECT id FROM users WHERE id = ?').get(sub)
+     await db.execute({ sql: 'SELECT id, username FROM users WHERE id = ?', args: [Number(sub)] })
      If not found → 401
      req.user = { id, username: un }
 2. signToken({ sub: req.user.id, un: req.user.username }, sessionSecret)  // rolling session
@@ -202,7 +204,8 @@ validatePassword(password)
 
 ```
 1. requireAuth(req, res, next)
-2. db.prepare('SELECT data, version, updated_at FROM user_data WHERE user_id = ?').get(req.user.id)
+2. row = await getRow(req.user.id)
+   // SELECT data, version, updated_at FROM user_data WHERE user_id = ?
 3. If no row: return 200 { data: null, version: 0 }
 4. JSON.parse(row.data) → parsedData
 5. 200 { data: parsedData, version: row.version, updatedAt: row.updated_at }
@@ -218,24 +221,27 @@ validatePassword(password)
 4. serialised = JSON.stringify(body.data)
 5. now = new Date().toISOString()
 
-BEGIN IMMEDIATE transaction:
-  currentRow = db.prepare('SELECT version, data FROM user_data WHERE user_id = ?').get(userId)
+result = await saveData(userId, serialised, body.version)   // single-statement compare-and-swap:
 
-  if (currentRow && currentRow.version !== body.version):
-    ROLLBACK
-    return 409 { error: 'Version conflict', server: { data: JSON.parse(currentRow.data),
-                                                        version: currentRow.version,
-                                                        updatedAt: currentRow.updated_at } }
+  if body.version === 0:
+    INSERT INTO user_data (user_id, data, version, updated_at) VALUES (?, ?, 1, ?)
+    ON CONFLICT(user_id) DO NOTHING
+  else:
+    UPDATE user_data SET data = ?, version = version + 1, updated_at = ?
+     WHERE user_id = ? AND version = ?
 
-  newVersion = (currentRow?.version ?? 0) + 1
+  if rowsAffected === 1:
+    → { conflict: false, version: body.version + 1, updatedAt: now }
+  else:
+    row = await getRow(userId)        // re-read the server copy
+    → { conflict: true, row }
 
-  db.prepare(`
-    INSERT INTO user_data (user_id, data, version, updated_at) VALUES (?,?,?,?)
-    ON CONFLICT(user_id) DO UPDATE SET data=excluded.data, version=excluded.version, updated_at=excluded.updated_at
-  `).run(userId, serialised, newVersion, now)
-COMMIT
+if result.conflict:
+  return 409 { error: 'Version conflict',
+               server: row ? { data: JSON.parse(row.data), version: row.version, updatedAt: row.updated_at }
+                           : { data: null, version: 0 } }
 
-6. 200 { version: newVersion, updatedAt: now }
+6. 200 { version: result.version, updatedAt: result.updatedAt }
 ```
 
 ---

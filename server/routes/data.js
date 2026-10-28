@@ -1,8 +1,8 @@
 /**
  * @module routes/data
  * Express Router for user progress data endpoints: GET and PUT /api/data.
- * Uses optimistic concurrency (compare-and-swap on `version`) inside a single
- * immediate SQLite transaction to prevent lost updates across devices.
+ * Uses optimistic concurrency (compare-and-swap on `version`) via single
+ * atomic statements to prevent lost updates across devices.
  */
 "use strict";
 
@@ -11,7 +11,7 @@ const { validateProgress } = require("../../js/progress-schema");
 
 /**
  * @typedef {object} DataRouterOptions
- * @property {import('better-sqlite3').Database} db
+ * @property {import('@libsql/client').Client} db
  * @property {import('express').RequestHandler} requireAuth - Middleware that sets `req.user`.
  */
 
@@ -23,29 +23,40 @@ const { validateProgress } = require("../../js/progress-schema");
 function createDataRouter({ db, requireAuth }) {
   const router = express.Router();
 
-  const q = {
-    getData: db.prepare("SELECT data, version, updated_at FROM user_data WHERE user_id = ?"),
-    insertData: db.prepare(
-      "INSERT INTO user_data (user_id, data, version, updated_at) VALUES (?, ?, 1, ?)"
-    ),
-    updateData: db.prepare(
-      "UPDATE user_data SET data = ?, version = version + 1, updated_at = ? WHERE user_id = ?"
-    ),
-  };
+  async function getRow(userId) {
+    const result = await db.execute({
+      sql: "SELECT data, version, updated_at FROM user_data WHERE user_id = ?",
+      args: [userId],
+    });
+    const row = result.rows[0];
+    return row
+      ? { data: String(row.data), version: Number(row.version), updated_at: String(row.updated_at) }
+      : undefined;
+  }
 
-  // Compare-and-swap: read current version and write atomically in one transaction.
-  const saveData = db.transaction((userId, dataText, clientVersion) => {
-    const row = q.getData.get(userId);
-    const serverVersion = row ? row.version : 0;
-    if (serverVersion !== clientVersion) return { conflict: true, row };
+  // Compare-and-swap in a single atomic statement: the write only lands if the
+  // stored version still equals the client's. Version 0 means "no row yet".
+  async function saveData(userId, dataText, clientVersion) {
     const now = new Date().toISOString();
-    if (row) q.updateData.run(dataText, now, userId);
-    else q.insertData.run(userId, dataText, now);
-    return { conflict: false, version: serverVersion + 1, updatedAt: now };
-  });
+    const result = clientVersion === 0
+      ? await db.execute({
+          sql: `INSERT INTO user_data (user_id, data, version, updated_at) VALUES (?, ?, 1, ?)
+                ON CONFLICT(user_id) DO NOTHING`,
+          args: [userId, dataText, now],
+        })
+      : await db.execute({
+          sql: `UPDATE user_data SET data = ?, version = version + 1, updated_at = ?
+                WHERE user_id = ? AND version = ?`,
+          args: [dataText, now, userId, clientVersion],
+        });
+    if (result.rowsAffected === 1) {
+      return { conflict: false, version: clientVersion + 1, updatedAt: now };
+    }
+    return { conflict: true, row: await getRow(userId) };
+  }
 
-  router.get("/", requireAuth, (req, res) => {
-    const row = q.getData.get(req.user.id);
+  router.get("/", requireAuth, async (req, res) => {
+    const row = await getRow(req.user.id);
     if (!row) return res.json({ data: null, version: 0 });
     res.json({
       data: JSON.parse(row.data),
@@ -54,7 +65,7 @@ function createDataRouter({ db, requireAuth }) {
     });
   });
 
-  router.put("/", requireAuth, (req, res) => {
+  router.put("/", requireAuth, async (req, res) => {
     const { data, version } = req.body || {};
     if (!Number.isInteger(version) || version < 0) {
       return res.status(400).json({ error: '"version" must be a non-negative integer.' });
@@ -66,7 +77,7 @@ function createDataRouter({ db, requireAuth }) {
         details: check.errors,
       });
     }
-    const result = saveData.immediate(req.user.id, JSON.stringify(data), version);
+    const result = await saveData(req.user.id, JSON.stringify(data), version);
     if (result.conflict) {
       const server = result.row
         ? {

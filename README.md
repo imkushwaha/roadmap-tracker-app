@@ -1,6 +1,6 @@
 # AI Engineer Roadmap — Progress Dashboard
 
-A single-page web application that converts `data/roadmap.md` (a structured 10-month Tier-1 AI Engineer career roadmap) into an interactive, multi-user progress tracker. Each user registers an account; progress is persisted per-user in SQLite so the same state is visible from any device.
+A single-page web application that converts `data/roadmap.md` (a structured 10-month Tier-1 AI Engineer career roadmap) into an interactive, multi-user progress tracker. Each user registers an account; progress is persisted per-user in [Turso](https://turso.tech) (hosted libSQL/SQLite) so the same state is visible from any device.
 
 ---
 
@@ -78,7 +78,7 @@ Additional capabilities:
 | Frontend | Plain HTML5, CSS3, Vanilla JS (ES2022) — no build step, no framework |
 | Backend | Node.js 22+, Express 5 |
 | Auth | `bcryptjs` (password hashing), `jsonwebtoken` (signed session cookies) |
-| Database | SQLite via `better-sqlite3`, WAL mode |
+| Database | Turso (hosted libSQL, SQLite-compatible) via `@libsql/client` — async API |
 | Security middleware | `helmet`, `express-rate-limit`, `cookie-parser` |
 | Roadmap parser | Python 3.10+ — `scripts/md_to_json.py` converts Markdown to JSON |
 | Testing | Node.js built-in `node:test` (no extra test runner) |
@@ -90,7 +90,8 @@ Additional capabilities:
 
 | Requirement | Version |
 |---|---|
-| Node.js | ≥ 22 (required by `better-sqlite3`) |
+| Node.js | ≥ 22 (`engines` in `package.json`) |
+| Turso database | Required in production (free tier is plenty); optional in development |
 | npm | ≥ 10 (bundled with Node 22) |
 | Python | ≥ 3.10 (only needed to regenerate roadmap data from Markdown) |
 
@@ -118,6 +119,8 @@ npm run dev
 # → http://localhost:3000
 ```
 
+Without `TURSO_DATABASE_URL`, development uses a local SQLite file at `data/app.db` (git-ignored), so no Turso account is needed to get started. To develop against your Turso database instead, set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in `.env` (see [Setting up Turso](#setting-up-turso)).
+
 Open http://localhost:3000, choose **Create an account**, and start tracking. Express serves both the API and the static frontend from one process — no separate dev server, no proxy, no CORS to configure.
 
 ### Run Tests
@@ -126,7 +129,7 @@ Open http://localhost:3000, choose **Create an account**, and start tracking. Ex
 npm test
 ```
 
-All 38 tests cover auth flows, data save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
+All 41 tests cover auth flows, data save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
 
 ### Regenerate Roadmap Data
 
@@ -154,16 +157,16 @@ roadmap-dashboard/
 │   └── progress-schema.js        Progress data validator (UMD — browser + server)
 │
 ├── server/
-│   ├── index.js                  Entry point: loads config, opens DB, starts server
+│   ├── index.js                  Entry point: loads config, connects to DB, starts server
 │   ├── app.js                    Express app factory (thin compositor)
 │   ├── config.js                 Env-var loader with fast-fail production validation
-│   ├── db.js                     SQLite open + schema (SCHEMA_SQL constant)
+│   ├── db.js                     Turso/libSQL connect + schema (SCHEMA_STATEMENTS)
 │   ├── auth/
 │   │   ├── service.js            Pure auth helpers: bcrypt, JWT, cookie options
 │   │   └── validators.js         Input validators: username, password
 │   └── routes/
 │       ├── auth.js               Router: /api/auth/register|login|logout|me
-│       └── data.js               Router: GET|PUT /api/data (CAS transaction)
+│       └── data.js               Router: GET|PUT /api/data (atomic CAS)
 │
 ├── scripts/
 │   └── md_to_json.py             Markdown → JSON/JS pipeline (RoadmapParser class)
@@ -179,9 +182,10 @@ roadmap-dashboard/
 │   ├── roadmap.json              Generated structured data
 │   ├── roadmap.js                Generated JS wrapper (window.ROADMAP_DATA)
 │   ├── schema.md                 JSON shape reference
-│   └── app.db                    SQLite database (runtime-created, git-ignored)
+│   └── app.db                    Local dev fallback DB only (created when TURSO_DATABASE_URL is unset; git-ignored)
 │
 ├── .env.example                  Configuration template
+├── render.yaml                   Render web-service blueprint (Turso env vars, no disk)
 └── package.json
 ```
 
@@ -195,12 +199,12 @@ roadmap-dashboard/
 graph TB
     User(["👤 User\n(Browser)"])
     Server["Roadmap Dashboard\nNode.js + Express\nport 3000"]
-    DB[("SQLite\napp.db")]
+    DB[("Turso\n(libSQL)")]
     Script["md_to_json.py\n(Python — run once\nafter editing roadmap.md)"]
     MD["data/roadmap.md\n(Source content)"]
 
     User -- "HTTP + session cookie" --> Server
-    Server -- "better-sqlite3\n(WAL mode)" --> DB
+    Server -- "@libsql/client\n(libsql:// + auth token)" --> DB
     Script -- "reads" --> MD
     Script -- "writes" --> Server
 ```
@@ -224,7 +228,7 @@ graph LR
         idx["server/index.js\nEntry point\nShutdown handler"]
         appfact["server/app.js\nApp factory\nMiddleware compositor"]
         cfg["server/config.js\nEnv loader"]
-        dbmod["server/db.js\nSchema · WAL · FKs"]
+        dbmod["server/db.js\nlibSQL client · Schema"]
 
         subgraph AuthLayer["Auth layer"]
             svc["auth/service.js\nbcrypt · JWT\nrequireAuth middleware"]
@@ -239,7 +243,7 @@ graph LR
         schsrv["js/progress-schema.js\nServer-side validator\n(same UMD file)"]
     end
 
-    SQLite[("SQLite\napp.db")]
+    Turso[("Turso\n(libSQL)")]
 
     html --> appjs
     appjs --> apijs
@@ -255,7 +259,7 @@ graph LR
     authR --> val
     dataR --> svc
     dataR --> schsrv
-    dbmod --> SQLite
+    dbmod --> Turso
 ```
 
 ---
@@ -328,7 +332,7 @@ sequenceDiagram
     participant AR as routes/auth.js
     participant SV as auth/service.js
     participant VA as auth/validators.js
-    participant DB as SQLite
+    participant DB as Turso (libSQL)
 
     Note over U,DB: Registration
     U  ->> B:  Enter username + password
@@ -347,7 +351,7 @@ sequenceDiagram
 
     Note over U,DB: Subsequent request (rolling session)
     B  ->> AR: GET /api/auth/me (cookie sent)
-    AR ->> SV: getCurrentUser(req, userByIdStmt, secret)
+    AR ->> SV: await getCurrentUser(req, db, secret)
     SV ->> DB: SELECT id, username WHERE id = <sub>
     DB -->> SV: user row
     AR ->> SV: signToken(user, …)  [renew]
@@ -365,7 +369,7 @@ sequenceDiagram
     participant MW as requireAuth middleware
     participant DR as routes/data.js
     participant SC as js/progress-schema.js
-    participant DB as SQLite
+    participant DB as Turso (libSQL)
 
     U  ->> B:  Mark task complete
     Note over B: Autosave fires ~1.5 s after last edit
@@ -377,15 +381,16 @@ sequenceDiagram
     DR ->> SC: validateProgress(data)
     SC -->> DR: {ok: true}
 
-    DR ->> DB: BEGIN IMMEDIATE TRANSACTION
-    DB ->> DR: SELECT version FROM user_data WHERE user_id = ?
+    DR ->> DB: Atomic CAS: UPDATE user_data SET data=?, version=version+1<br/>WHERE user_id=? AND version=?<br/>(first save: INSERT … ON CONFLICT DO NOTHING)
 
-    alt Client version matches server version
-        DR ->> DB: UPDATE user_data SET data=?, version=version+1
-        DB -->> DR: OK
+    alt rowsAffected = 1 (client version matched)
+        DB -->> DR: 1 row changed
         DR ->> B:  200 {version: N+1, updatedAt}
         B  -->> U: "Saved ✓"
-    else Stale version (edited from another device)
+    else rowsAffected = 0 (stale version — edited from another device)
+        DB -->> DR: 0 rows changed
+        DR ->> DB: SELECT data, version, updated_at WHERE user_id=?
+        DB -->> DR: server row
         DR ->> B:  409 {error: "Version conflict", server: {data, version}}
         B  -->> U: Conflict dialog — Load server / Overwrite
     end
@@ -478,11 +483,14 @@ cp .env.example .env
 | Variable | Default | Description |
 |---|---|---|
 | `SESSION_SECRET` | Random (dev only) | Signs session JWTs. **Required in production** (≥ 32 chars). Generate: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
-| `DB_PATH` | `./data/app.db` | SQLite file path. Relative paths resolve from the project root. Use `":memory:"` for tests. |
+| `TURSO_DATABASE_URL` | Local file `data/app.db` (dev only) | Turso database URL (`libsql://<db>-<org>.turso.io`). **Required in production.** Also accepts `file:…` or `:memory:` (tests use `:memory:`). |
+| `TURSO_AUTH_TOKEN` | — | Turso auth token. **Required in production when the URL is remote** (`libsql://`, `https://`, `wss://`); not needed for local `file:`/`:memory:` targets. |
 | `PORT` | `3000` | HTTP port the server listens on. |
 | `TRUST_PROXY` | off | Set to `1` when behind a single reverse proxy so rate limiting sees real client IPs. |
 | `COOKIE_SECURE` | `true` in production | Session cookie `Secure` flag. Set `false` **only** for plain-HTTP production setups (e.g. a LAN box). |
-| `NODE_ENV` | — | Set to `production` to enable strict secret validation and secure cookies. |
+| `NODE_ENV` | — | Set to `production` to enable strict secret/database validation and secure cookies. |
+
+> `DB_PATH` no longer exists. Production fails fast at startup if `SESSION_SECRET` or `TURSO_DATABASE_URL` (or the token for a remote URL) is missing.
 
 ---
 
@@ -510,7 +518,7 @@ All endpoints return and accept JSON. Sessions are managed via an httpOnly `Same
 | `GET` | `/api/data` | — | `200 {data, version, updatedAt}` · `{data:null, version:0}` for new users |
 | `PUT` | `/api/data` | `{data, version}` | `200 {version, updatedAt}` · `400` schema error · `409` version conflict · `413` body > 5 MB |
 
-The `PUT` endpoint uses **compare-and-swap**: if the server's current version differs from `version` in the request, a `409` is returned with the server copy so the client can resolve the conflict.
+The `PUT` endpoint uses **compare-and-swap** in a single atomic statement (`UPDATE … WHERE user_id = ? AND version = ?`, or `INSERT … ON CONFLICT DO NOTHING` for a first save with `version: 0`). If no row changes because the server's current version differs from `version` in the request, the server row is read and a `409` is returned with it so the client can resolve the conflict.
 
 ### Static files served
 
@@ -531,7 +539,8 @@ Everything else (database, `.env`, server source, `package.json`, `node_modules`
 | HTTP headers | `helmet` sets `X-Content-Type-Options`, `X-Frame-Options`, `X-DNS-Prefetch-Control`, `Referrer-Policy`, etc. `X-Powered-By` is removed. |
 | API cacheability | All `/api` responses carry `Cache-Control: no-store`. |
 | Input validation | Username regex + password length checked before any DB call. Progress data validated against the schema before every write. |
-| SQL injection | All queries use `better-sqlite3` parameterised prepared statements. User data queries are always scoped by session user id, never by request body. |
+| Database credentials | `TURSO_AUTH_TOKEN` lives only in environment variables (`.env` is git-ignored; `sync: false` in `render.yaml` keeps it out of the repo). |
+| SQL injection | All queries are parameterised via `db.execute({ sql, args })` (`@libsql/client`); values are never interpolated into SQL. User data queries are always scoped by session user id, never by request body. |
 | Static allowlist | Only four path patterns serve files; `path.join` + `sendFile` prevent path-traversal. |
 
 **Not included by design:** password reset, email verification, 2FA, account deletion UI, admin interface, JWT revocation.
@@ -556,7 +565,7 @@ Roadmap (data/roadmap.json — generated, read-only)
 ```
 
 ```
-Progress (SQLite user_data.data — per-user, server-persisted)
+Progress (Turso user_data.data — per-user, server-persisted)
 ├─ items{}         { [taskId]: { status, notes, link, dueDate, completedAt } }
 ├─ counters{}      { [counterId]: currentValue }
 ├─ celebratedPhases[]   Phase IDs where the completion celebration has fired
@@ -576,7 +585,7 @@ See `data/schema.md` for the complete shape with all fields.
 npm test
 ```
 
-The test suite uses Node's built-in `node:test` runner — no Jest, no Mocha. Each test boots a real HTTP server on an ephemeral port backed by an in-memory SQLite database, so tests are fully isolated, fast, and require no mocking.
+The test suite uses Node's built-in `node:test` runner — no Jest, no Mocha. Each test boots a real HTTP server on an ephemeral port backed by an in-memory libSQL database (`:memory:`), so tests are fully isolated, fast, and require no mocking.
 
 | Test file | Coverage |
 |---|---|
@@ -618,7 +627,23 @@ Sections not matching a `## Week N` pattern in Months 9–10 are routed to their
 
 ## Deploying to Production
 
-The server requires **persistent disk** for the SQLite file. Free static hosts (GitHub Pages, Netlify, Vercel) cannot run it. Use a VM/VPS, a container with a volume (Fly.io, Railway, Render with disk), or a home server.
+The server is a long-running Node.js process, so static hosts (GitHub Pages, Netlify, Vercel static) cannot run it; use any Node host (Render, Fly.io, Railway, a VPS, a home server). All data lives in **Turso**, not on the host's disk, so **no persistent disk or volume is needed** — redeploying or replacing the host keeps every user and their progress.
+
+### Setting up Turso
+
+```bash
+# Install the CLI (macOS/Linux; on Windows: winget install turso)
+curl -sSfL https://get.tur.so/install.sh | bash
+
+turso auth login
+turso db create roadmap-dashboard
+turso db show roadmap-dashboard --url          # → TURSO_DATABASE_URL (libsql://…)
+turso db tokens create roadmap-dashboard       # → TURSO_AUTH_TOKEN (keep secret)
+```
+
+The schema (`users`, `user_data`) is created automatically on first start (`CREATE TABLE IF NOT EXISTS`).
+
+### Running anywhere
 
 ```bash
 # Install production dependencies only
@@ -627,12 +652,23 @@ npm ci --omit=dev
 # Set environment variables (or use a .env file)
 export NODE_ENV=production
 export SESSION_SECRET="$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")"
-export DB_PATH=/var/lib/roadmap/app.db   # on a persistent volume
+export TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io"
+export TURSO_AUTH_TOKEN="<token>"
 export PORT=3000
 export TRUST_PROXY=1                     # if behind a reverse proxy
 
 npm start
 ```
+
+### Deploying to Render
+
+`render.yaml` in the repo defines the web service (Node 22.x, `npm install`, `npm start`, `TRUST_PROXY=1`, a generated `SESSION_SECRET`). It declares no disk.
+
+1. Push the repo to GitHub and create a Render **Web Service** (or Blueprint) from it.
+2. In the service's **Environment** tab set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (declared with `sync: false`, so Render never reads them from the repo and you enter them in the dashboard).
+3. Make sure `SESSION_SECRET` is set. `generateValue: true` in `render.yaml` only applies when Render creates the service from the blueprint; for a service created earlier, set it manually.
+4. Remove any old `DB_PATH` variable, and detach the old persistent disk if you added one.
+5. Deploy. Register a user, redeploy, and confirm you can still log in.
 
 ### Production checklist
 
@@ -645,17 +681,17 @@ npm start
    }
    ```
 
-2. **Persistent volume** — `DB_PATH` must survive restarts and redeploys. SQLite WAL mode creates `app.db-wal` and `app.db-shm` alongside `app.db` — keep all three together. Run **one** server process against a given database file.
+2. **Database** — Persistence is handled by Turso; the host needs no volume. The old "one server process per database file" restriction no longer applies, since Turso handles concurrent connections. Keep `TURSO_AUTH_TOKEN` in a secrets store; rotate it with `turso db tokens create` if it leaks.
 
-3. **Backups** — Don't `cp` a live WAL database. Use SQLite online backup:
+3. **Backups** — Dump the database to SQL on a schedule and copy it off-machine:
    ```bash
-   sqlite3 /var/lib/roadmap/app.db ".backup '/backups/app-$(date +%F).db'"
+   turso db shell roadmap-dashboard .dump > backup-$(date +%F).sql
    ```
-   Schedule with cron or a systemd timer and copy the result off-machine.
+   Restore into a new database with `turso db create <new-name> --from-dump backup-YYYY-MM-DD.sql`. Check your Turso plan for built-in point-in-time recovery limits.
 
 4. **Stable `SESSION_SECRET`** — Changing it logs out every user. Store it in a secrets manager or a secure env-var store, not in the repository.
 
-5. **Process manager** — Run under systemd, Docker, or pm2 so the server restarts on failure. It shuts down cleanly on `SIGINT`/`SIGTERM` (drains in-flight requests and closes the database).
+5. **Process manager** — Run under systemd, Docker, or pm2 so the server restarts on failure. It shuts down cleanly on `SIGINT`/`SIGTERM` (drains in-flight requests and closes the database client).
 
 ---
 
@@ -673,7 +709,7 @@ The codebase follows **SOLID** principles throughout:
 | `routes/data.js` | HTTP data route handlers |
 | `server/app.js` | Compose middleware and routers — no business logic |
 | `server/config.js` | Parse and validate environment variables |
-| `server/db.js` | Open database, apply schema |
+| `server/db.js` | Connect to Turso/libSQL, apply schema |
 | `RoadmapParser` | Parse Markdown into structured data |
 | `SlugRegistry` | Generate unique kebab-case IDs |
 
