@@ -1037,19 +1037,15 @@
     } else {
       document.documentElement.removeAttribute("data-theme");
     }
-    document.getElementById("themeToggle").textContent =
-      (theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)) ? "☀️" : "🌙";
+    const isDark = theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const lightBtn = document.getElementById("themeLightBtn");
+    const darkBtn = document.getElementById("themeDarkBtn");
+    if (lightBtn) lightBtn.classList.toggle("active", !isDark);
+    if (darkBtn) darkBtn.classList.toggle("active", isDark);
   }
   function initTheme() {
     const saved = localStorage.getItem(THEME_KEY);
     applyTheme(saved);
-  }
-  function toggleTheme() {
-    const current = document.documentElement.getAttribute("data-theme") ||
-      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = current === "dark" ? "light" : "dark";
-    localStorage.setItem(THEME_KEY, next);
-    applyTheme(next);
   }
 
   // ---------------------------------------------------------
@@ -1421,49 +1417,72 @@
       if (btn) setView(btn.dataset.view);
     });
 
-    document.getElementById("themeToggle").addEventListener("click", toggleTheme);
+    // Profile panel toggle
+    const profileTrigger = document.getElementById("profileTrigger");
+    const profilePanel = document.getElementById("profilePanel");
+    const closePanel = () => {
+      profilePanel.classList.add("hidden");
+      profileTrigger.setAttribute("aria-expanded", "false");
+    };
 
-    const searchToggle = document.getElementById("searchToggle");
-    const searchBar = document.getElementById("searchBar");
-    const searchInput = document.getElementById("searchInput");
-    searchToggle.addEventListener("click", () => {
-      searchBar.classList.toggle("hidden");
-      if (!searchBar.classList.contains("hidden")) searchInput.focus();
-    });
-    document.getElementById("searchClose").addEventListener("click", () => {
-      searchBar.classList.add("hidden");
-      searchInput.value = "";
-      state.search = "";
-      rerender();
-    });
-    searchInput.addEventListener("input", () => {
-      state.search = searchInput.value;
-      rerender();
-    });
-
-    const dataMenuToggle = document.getElementById("dataMenuToggle");
-    const dataMenu = document.getElementById("dataMenu");
-    dataMenuToggle.addEventListener("click", (e) => {
+    profileTrigger.addEventListener("click", (e) => {
       e.stopPropagation();
-      document.getElementById("legacyImportBtn").classList.toggle("hidden", !readLegacyLocalData());
-      dataMenu.classList.toggle("hidden");
+      const opening = profilePanel.classList.contains("hidden");
+      if (opening) {
+        document.getElementById("legacyImportBtn").classList.toggle("hidden", !readLegacyLocalData());
+      }
+      profilePanel.classList.toggle("hidden", !opening);
+      profileTrigger.setAttribute("aria-expanded", String(opening));
     });
+    document.addEventListener("click", (e) => {
+      if (!profilePanel.classList.contains("hidden") &&
+          !document.getElementById("profileAnchor").contains(e.target)) {
+        closePanel();
+      }
+    });
+
+    // Theme
+    document.getElementById("themeLightBtn").addEventListener("click", () => {
+      localStorage.setItem(THEME_KEY, "light");
+      applyTheme("light");
+    });
+    document.getElementById("themeDarkBtn").addEventListener("click", () => {
+      localStorage.setItem(THEME_KEY, "dark");
+      applyTheme("dark");
+    });
+
+    // Search (always visible inside profile panel)
+    const panelSearch = document.getElementById("panelSearch");
+    panelSearch.addEventListener("input", () => {
+      state.search = panelSearch.value;
+      rerender();
+    });
+
+    // Data actions
     document.getElementById("legacyImportBtn").addEventListener("click", () => {
-      dataMenu.classList.add("hidden");
+      closePanel();
       openLegacyModal(session.version > 0);
     });
-    document.addEventListener("click", () => dataMenu.classList.add("hidden"));
-    dataMenu.addEventListener("click", (e) => e.stopPropagation());
-
-    document.getElementById("exportBtn").addEventListener("click", () => { exportProgress(); dataMenu.classList.add("hidden"); });
-    document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importFile").click());
+    document.getElementById("exportBtn").addEventListener("click", () => {
+      exportProgress();
+      closePanel();
+    });
+    document.getElementById("importBtn").addEventListener("click", () => {
+      document.getElementById("importFile").click();
+      closePanel();
+    });
     document.getElementById("importFile").addEventListener("change", (e) => {
       if (e.target.files[0]) importProgress(e.target.files[0]);
       e.target.value = "";
-      dataMenu.classList.add("hidden");
     });
-    document.getElementById("resetBtn").addEventListener("click", () => { confirmReset(); dataMenu.classList.add("hidden"); });
-    document.getElementById("startMonthBtn").addEventListener("click", () => { openStartMonthModal(); dataMenu.classList.add("hidden"); });
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      confirmReset();
+      closePanel();
+    });
+    document.getElementById("startMonthBtn").addEventListener("click", () => {
+      openStartMonthModal();
+      closePanel();
+    });
 
     document.getElementById("modalHost").addEventListener("click", (e) => {
       if (e.target.classList.contains("modal-backdrop")) closeModal();
@@ -1635,8 +1654,8 @@
     error: "Save failed — click to retry", conflict: "Conflict — click to resolve",
   };
   function setSaveStatus(kind, detail) {
-    const el = $("saveStatus");
-    el.className = "save-status " + kind;
+    const el = $("panelSaveStatus");
+    el.className = "profile-panel-save " + kind;
     el.textContent = SAVE_LABELS[kind];
     el.title = detail || "";
     el.dataset.kind = kind;
@@ -1852,9 +1871,8 @@
     rebuildIndex();
     hideAuth();
     unlockApp();
-    $("userName").textContent = username;
-    $("userChip").title = "Signed in as " + username;
-    ["userChip", "logoutBtn"].forEach((id) => $(id).classList.remove("hidden"));
+    $("profileName").textContent = username;
+    $("panelUsername").textContent = username;
     setSaveStatus("saved");
     rerender();
     checkMilestones();
@@ -1926,8 +1944,8 @@
     $("authToggle").addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
     $("authDownload").addEventListener("click", exportProgress);
     $("logoutBtn").addEventListener("click", logout);
-    $("saveStatus").addEventListener("click", () => {
-      const kind = $("saveStatus").dataset.kind;
+    $("panelSaveStatus").addEventListener("click", () => {
+      const kind = $("panelSaveStatus").dataset.kind;
       if (kind === "error") { session.retries = 0; flushSave(); }
       if (kind === "conflict") openConflictModal();
     });

@@ -135,40 +135,73 @@ input, select, textarea { font-family: inherit; }
 .brand h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
 .brand .subtitle { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
 
-.header-actions { display: flex; align-items: center; gap: 6px; position: relative; }
-.icon-btn {
-  width: 36px; height: 36px; border-radius: 10px;
-  border: 1px solid var(--border); background: var(--bg-elevated);
-  color: var(--text); font-size: 16px;
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.12s;
-}
-.icon-btn:hover { background: var(--bg-sunken); }
+/* ── Profile Anchor ─────────────────────────────────────── */
+.profile-anchor { position: relative; flex-shrink: 0; }
 
-.dropdown-menu {
-  position: absolute; top: 44px; right: 0;
+.profile-trigger {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 13.5px; font-weight: 500;
+  cursor: pointer; transition: background 0.15s;
+}
+.profile-trigger:hover { background: var(--bg-elevated); filter: brightness(0.97); }
+.profile-trigger[aria-expanded="true"] { background: var(--bg-elevated); }
+.profile-trigger-caret { font-size: 11px; opacity: 0.5; }
+
+/* ── Profile Panel ──────────────────────────────────────── */
+.profile-panel {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  width: 240px;
   background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
-  min-width: 220px; padding: 6px; z-index: 60;
-  display: flex; flex-direction: column; gap: 2px;
+  border-radius: 12px; box-shadow: var(--shadow-lg);
+  z-index: 200; padding: 4px 0;
+  display: flex; flex-direction: column;
 }
-.dropdown-menu button {
-  text-align: left; border: none; background: transparent;
-  padding: 9px 10px; border-radius: 8px; font-size: 13.5px; color: var(--text);
-}
-.dropdown-menu button:hover { background: var(--bg-sunken); }
-.dropdown-menu button.danger { color: var(--status-blocked); }
-.dropdown-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+.profile-panel.hidden { display: none; }
 
-.search-bar {
-  max-width: 1280px; margin: 0 auto; padding: 0 20px 12px;
-  display: flex; gap: 8px; align-items: center;
+.profile-panel-header { display: flex; flex-direction: column; gap: 3px; padding: 12px 16px 10px; }
+.profile-panel-username { font-weight: 600; font-size: 13.5px; color: var(--text); }
+.profile-panel-save { font-size: 11.5px; color: var(--text-faint); min-height: 16px; }
+.profile-panel-save.saving { color: var(--status-in-progress); }
+.profile-panel-save.saved  { color: var(--status-completed); }
+.profile-panel-save.error, .profile-panel-save.conflict { color: var(--status-blocked); cursor: pointer; }
+
+.profile-panel-sep { height: 1px; background: var(--border); margin: 2px 0; }
+
+.profile-panel-section { padding: 8px 16px; display: flex; flex-direction: column; gap: 6px; }
+.profile-panel-label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint);
 }
-.search-bar input {
-  flex: 1; padding: 9px 12px; border-radius: 9px;
-  border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text);
-  font-size: 13.5px;
+
+.profile-panel-search {
+  width: 100%; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-sunken); color: var(--text); font-size: 13px;
+  box-sizing: border-box;
 }
+.profile-panel-search:focus { outline: none; border-color: var(--accent); }
+
+.profile-theme-btns { display: flex; gap: 6px; }
+.profile-theme-btn {
+  flex: 1; padding: 5px 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-sunken); color: var(--text); font-size: 12.5px;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.profile-theme-btn:hover { background: var(--bg-elevated); }
+.profile-theme-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+.profile-action-btn {
+  width: 100%; text-align: left; padding: 7px 0;
+  background: none; border: none; color: var(--text); font-size: 13px;
+  cursor: pointer; border-radius: 4px; transition: color 0.15s;
+}
+.profile-action-btn:hover { color: var(--accent); }
+.profile-action-btn.danger { color: var(--status-blocked); }
+.profile-action-btn.danger:hover { opacity: 0.8; }
+.profile-logout { font-weight: 600; }
 
 .tabs {
   max-width: 1280px; margin: 0 auto;
@@ -471,28 +504,6 @@ body.locked .app-header, body.locked main { display: none; }
 .link-btn { background: none; border: none; padding: 0; color: var(--accent); font-size: inherit; font-weight: 600; text-decoration: underline; }
 #authDownload { display: block; margin: 12px auto 0; font-size: 12.5px; }
 
-.save-status {
-  border: none; background: transparent; font-size: 12px; font-weight: 600; color: var(--text-faint);
-  padding: 4px 8px; border-radius: 99px; cursor: default; min-width: 0;
-}
-.save-status.saving { color: var(--status-in-progress); }
-.save-status.saved { color: var(--status-completed); }
-.save-status.error, .save-status.conflict { color: var(--status-blocked); background: var(--status-blocked-bg); cursor: pointer; }
-.user-chip { font-size: 12.5px; font-weight: 600; color: var(--text-muted); padding: 0 4px; white-space: nowrap; }
-.btn-sm {
-  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text);
-  border-radius: 9px; padding: 7px 11px; font-size: 12.5px; font-weight: 600;
-}
-.btn-sm:hover { background: var(--bg-sunken); }
-@media (max-width: 640px) {
-  .user-chip .user-name { display: none; }
-  .save-status { padding: 4px 4px; font-size: 11px; }
-}
-.btn-sm { white-space: nowrap; }
-@media (max-width: 480px) {
-  .brand > div { display: none; }   /* icon only; room is needed for save status + log out */
-  .header-inner { gap: 8px; }
-}
 
 /* ---------------- Custom months / sections ---------------- */
 .add-month-btn { display: block; margin: 6px 0 0 28px; padding: 10px 16px; font-size: 13px; }

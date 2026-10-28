@@ -393,11 +393,13 @@ This is the most complex refactor. The 627-line script has global state, no type
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     pass  # forward references only
 
 # Replace bare dicts with dataclasses or TypedDicts for all data shapes:
 from typing import TypedDict, Literal, Optional
+
 
 class Subtask(TypedDict):
     id: str
@@ -407,9 +409,11 @@ class Subtask(TypedDict):
     link: str
     dueDate: None
 
+
 class ChecklistGroup(TypedDict):
     label: Optional[str]
     subtasks: list[Subtask]
+
 
 class Topic(TypedDict):
     id: str
@@ -452,6 +456,7 @@ Pass a `SlugRegistry` instance down the call chain instead of reading a global.
 def load_lines(path: Path) -> list[str]:
     """Read *path* and return its lines without trailing newlines."""
     return path.read_text(encoding="utf-8").splitlines()
+
 
 def write_output(data: dict, json_path: Path, js_path: Path) -> None:
     """Serialise *data* to *json_path* and wrap it for *js_path*."""

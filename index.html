@@ -47,28 +47,45 @@
         <p class="subtitle">Tier-1 Production AI Engineer — 10-Month Execution Tracker</p>
       </div>
     </div>
-    <div class="header-actions">
-      <button id="saveStatus" class="save-status" type="button" aria-live="polite"></button>
-      <span id="userChip" class="user-chip hidden" title=""><span aria-hidden="true">👤</span> <span id="userName" class="user-name"></span></span>
-      <button id="logoutBtn" class="btn-sm hidden" type="button">Log out</button>
-      <button id="searchToggle" class="icon-btn" title="Search" aria-label="Search">🔎</button>
-      <button id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
-      <button id="dataMenuToggle" class="icon-btn" title="Data: export / import / reset" aria-label="Data menu">⋮</button>
-      <div id="dataMenu" class="dropdown-menu hidden">
-        <button id="startMonthBtn">📅 Set start month…</button>
-        <div class="dropdown-sep"></div>
-        <button id="exportBtn">⬇ Export progress (JSON)</button>
-        <button id="importBtn">⬆ Import progress (JSON)</button>
-        <button id="legacyImportBtn" class="hidden">🗂 Import old data from this browser…</button>
-        <input type="file" id="importFile" accept="application/json" class="hidden" />
-        <div class="dropdown-sep"></div>
-        <button id="resetBtn" class="danger">⟲ Reset progress…</button>
+    <div class="profile-anchor" id="profileAnchor">
+      <button class="profile-trigger" id="profileTrigger" aria-haspopup="true" aria-expanded="false">
+        <span class="profile-trigger-avatar" aria-hidden="true">👤</span>
+        <span class="profile-trigger-name" id="profileName">—</span>
+        <span class="profile-trigger-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="profile-panel hidden" id="profilePanel" role="menu">
+        <div class="profile-panel-header">
+          <span class="profile-panel-username" id="panelUsername">—</span>
+          <span class="profile-panel-save" id="panelSaveStatus" aria-live="polite"></span>
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <label class="profile-panel-label" for="panelSearch">Search</label>
+          <input type="search" id="panelSearch" class="profile-panel-search" placeholder="Search topics, tasks, notes…" aria-label="Search tasks" autocomplete="off" />
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <span class="profile-panel-label">Theme</span>
+          <div class="profile-theme-btns">
+            <button class="profile-theme-btn" id="themeLightBtn" data-theme="light">Light</button>
+            <button class="profile-theme-btn" id="themeDarkBtn" data-theme="dark">Dark</button>
+          </div>
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <button class="profile-action-btn" id="startMonthBtn">📅 Set start month…</button>
+          <button class="profile-action-btn" id="exportBtn">⬇ Export progress (JSON)</button>
+          <button class="profile-action-btn" id="importBtn">⬆ Import progress (JSON)</button>
+          <input type="file" id="importFile" accept="application/json" class="hidden" />
+          <button id="legacyImportBtn" class="profile-action-btn hidden">🗂 Import old data from this browser…</button>
+          <button class="profile-action-btn danger" id="resetBtn">⟲ Reset progress…</button>
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <button class="profile-action-btn profile-logout" id="logoutBtn">Log out</button>
+        </div>
       </div>
     </div>
-  </div>
-  <div id="searchBar" class="search-bar hidden">
-    <input id="searchInput" type="search" placeholder="Search topics, tasks, notes…" aria-label="Search tasks" />
-    <button id="searchClose" class="icon-btn" aria-label="Close search">✕</button>
   </div>
   <nav class="tabs" id="tabs">
     <button class="tab active" data-view="overview">Overview</button>
