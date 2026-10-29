@@ -18,6 +18,7 @@ const {
   buildCookieOptions,
 } = require("../auth/service");
 const { validateName, validateUsername, validatePassword } = require("../auth/validators");
+const { BUILTIN_AI_ENGINEER } = require("../roadmaps/builtin");
 
 const SESSION_DAYS = 7;
 const RATE_LIMIT_MESSAGE = {
@@ -114,11 +115,18 @@ function createAuthRouter({
     const ln = lastName.trim();
     let id;
     try {
-      const result = await db.execute({
-        sql: "INSERT INTO users (username, password_hash, first_name, last_name) VALUES (?, ?, ?, ?)",
-        args: [username, hash, fn, ln],
-      });
-      id = result.lastInsertRowid;
+      // One transaction: an account never exists without its starter roadmap.
+      const [created] = await db.batch([
+        {
+          sql: "INSERT INTO users (username, password_hash, first_name, last_name) VALUES (?, ?, ?, ?)",
+          args: [username, hash, fn, ln],
+        },
+        {
+          sql: "INSERT INTO roadmaps (user_id, name, description, source) VALUES (last_insert_rowid(), ?, ?, ?)",
+          args: [BUILTIN_AI_ENGINEER.name, BUILTIN_AI_ENGINEER.description, BUILTIN_AI_ENGINEER.source],
+        },
+      ], "write");
+      id = created.lastInsertRowid;
     } catch (e) {
       if (isUniqueViolation(e)) {
         return res.status(409).json({ error: "That username is already taken." });

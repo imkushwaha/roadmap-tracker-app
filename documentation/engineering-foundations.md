@@ -28,7 +28,8 @@ roadmap-dashboard/
 ├── scripts/        ← Developer tooling (Python parser — not a runtime dep)
 ├── server/         ← All backend code
 │   ├── auth/       ← Auth-specific helpers (pure functions, no routes)
-│   └── routes/     ← Express routers (auth + data)
+│   ├── roadmaps/   ← Built-in roadmap identity (BUILTIN_AI_ENGINEER)
+│   └── routes/     ← Express routers (auth + roadmaps)
 └── test/           ← All tests + helpers
 ```
 
@@ -36,7 +37,7 @@ roadmap-dashboard/
 
 - `snake_case` for Python scripts
 - `camelCase.js` for Node.js modules
-- Routers named by resource: `auth.js`, `data.js`
+- Routers named by resource: `auth.js`, `roadmaps.js`
 - Helpers named by concern: `service.js`, `validators.js`
 
 ### Module Exports
@@ -118,15 +119,17 @@ This overwrites `data/roadmap.json` and `data/roadmap.js`. Commit both generated
 
 ### Rate Limiting
 
-- Global: 10 requests per 15-minute window per IP.
-- Login sub-limit: tracks failed attempts specifically to slow brute-force attacks.
+- `register` and `login`: 10 requests per 15-minute window per IP; only failed logins count toward the login limit, to slow brute-force attacks.
+- `check-username`: a looser 30 per window.
+- `/api/roadmaps` routes require a session and are not separately rate-limited.
 - `TRUST_PROXY` config correctly extracts client IP when behind a reverse proxy.
 
 ### Input Validation
 
-- `validateUsername` / `validatePassword` validate auth inputs before any DB touch.
-- `validateProgress` (shared UMD) validates the full `ProgressStore` shape before every `PUT /api/data` write. Invalid data is rejected with a descriptive 400 before it can reach the database.
-- Body size limit of **5 MB** on `PUT /api/data` prevents DoS via large payloads.
+- `validateName` / `validateUsername` / `validatePassword` validate auth inputs before any DB touch.
+- `validateProgress` (shared UMD) validates the full `ProgressStore` shape before every `PUT /api/roadmaps/:id/progress` write. Invalid data is rejected with a descriptive 400 before it can reach the database.
+- Roadmap ids are parsed strictly (`/^d+$/`); a malformed id is a 404, and every roadmap query is scoped by the session user, so another user's roadmap is indistinguishable from a missing one.
+- Body size limit of **5 MB** on `PUT /api/roadmaps/:id/progress` prevents DoS via large payloads.
 
 ### File Serving Allowlist
 
@@ -144,7 +147,7 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 
 ### Optimistic Concurrency Control
 
-`PUT /api/data` performs a single-statement compare-and-swap: `UPDATE … WHERE user_id = ? AND version = ?` (or `INSERT … ON CONFLICT DO NOTHING` for a first save). The write only lands if the stored `version` still matches the client's; otherwise zero rows are affected and the route re-reads the server copy and returns 409 (e.g. another browser tab saved first). This prevents silent data loss without pessimistic locking or a multi-statement transaction (one network round trip to Turso).
+`PUT /api/roadmaps/:id/progress` performs a single-statement compare-and-swap per roadmap: `UPDATE roadmap_progress … WHERE roadmap_id = ? AND version = ?` (or `INSERT … ON CONFLICT DO NOTHING` for a first save). The write only lands if the stored `version` still matches the client's; otherwise zero rows are affected and the route re-reads the server copy and returns 409 (e.g. another browser tab saved first). This prevents silent data loss without pessimistic locking or a multi-statement transaction (one network round trip to Turso).
 
 ### Autosave Resilience
 
@@ -156,8 +159,10 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 ### Database
 
 - **Durable hosted storage**: data lives in Turso, not on the web server's disk, so redeploys and restarts on Render do not wipe users or progress.
-- **Foreign keys enforced** (libSQL default; verified by the cascade test) ensures `user_data.user_id` always references a real `users.id`.
-- **`ON DELETE CASCADE`** means deleting a user cleans up their data row atomically.
+- **Foreign keys enforced** (libSQL default; verified by the cascade test) ensures `roadmaps.user_id` always references a real `users.id` and `roadmap_progress.roadmap_id` a real `roadmaps.id`.
+- **`ON DELETE CASCADE`** means deleting a roadmap removes its progress row, and deleting a user removes their roadmaps and progress, atomically.
+- **Atomic registration**: the user row and the starter roadmap are inserted in one `db.batch` transaction, so a failed or duplicate registration leaves no orphan rows.
+- **Safe schema migration**: the one-time `user_data` → `roadmaps` move runs in a single transaction, keeps each progress `version`, and renames (not drops) the old table to `user_data_legacy`.
 
 ---
 
@@ -173,7 +178,8 @@ Unit tests target the two pure, stateless modules: `loadConfig` and `validatePro
 
 ```
 test/helpers.js     — shared: startServer(), client (cookie-jar fetch), fixtures
-test/api.test.js    — HTTP integration (auth flow, data CRUD, conflict, isolation, security)
+test/api.test.js    — HTTP integration (auth flow, progress save/load, conflict, isolation, security)
+test/roadmaps.test.js — roadmap list/restore/delete, ownership, atomic registration, legacy migration
 test/config.test.js — loadConfig() unit tests
 test/schema.test.js — validateProgress() unit tests
 ```
@@ -183,9 +189,11 @@ test/schema.test.js — validateProgress() unit tests
 | Scenario | What It Verifies |
 |----------|-----------------|
 | Register → login → me → logout | Full auth lifecycle |
-| PUT then GET | Data round-trips correctly |
+| PUT then GET `/api/roadmaps/:id/progress` | Progress round-trips correctly |
+| Delete a roadmap, restore the built-in one | Cascade removes progress; restore starts fresh and is allowed once |
+| Boot a database that has `user_data` | Progress and version copied once; old table renamed; deleted roadmaps not re-seeded |
 | Two-tab conflict (PUT twice with same version) | 409 returned with server's copy |
-| User A cannot read User B's data | Per-user isolation |
+| User A cannot read, write or delete User B's roadmap | Per-user isolation (404) |
 | GET `/data/app.db` returns 404 | File serving allowlist |
 | GET `/css/styles.css` returns 200 | Static files work |
 | Rapid login attempts | Rate limiting kicks in |
@@ -223,8 +231,9 @@ npm test
 |------------|--------|----------------------|
 | Turso free tier + network hop | Each query is a network round trip; depends on an external service and its credentials; free-tier usage limits apply (ample for ~10–20 users) | Co-locate the Render region with the Turso region; move to a paid Turso plan or PostgreSQL if usage grows |
 | JWT in cookie (no blacklist) | Logout clears cookie but issued token remains valid until expiry if intercepted | Add a token revocation table or use short-lived tokens |
-| No pagination on data read | `user_data.data` JSON blob grows with roadmap size | Already bounded by 5 MB limit; current roadmap is well under |
-| `js/app.js` is a monolith (~1961 lines) | Harder to navigate; no tree-shaking | Split into view modules (refactor plan drafted in `.claude/code-refactor-plan.md`) |
+| No pagination on data read | `roadmap_progress.data` JSON blob grows with roadmap size | Already bounded by 5 MB limit; current roadmap is well under |
+| `js/app.js` is a monolith (~2.2k lines) | Harder to navigate; no tree-shaking | Split into view modules (refactor plan drafted in `.claude/code-refactor-plan.md`) |
 | Python parser as manual step | Roadmap content updates require a developer with Python | Could become a CI step or a small Node script |
 | No HTTPS in development | Cookies with `Secure` flag off | Use `mkcert` or a local reverse proxy for HTTPS dev |
 | Single user per account | No team/shared progress | Would require multi-tenancy or shared roadmap features |
+| Custom roadmaps not yet creatable | The dashboard lists roadmaps but only the built-in AI Engineer one exists; "Create new roadmap" and "Create with AI" are disabled placeholders | Planned for later phases (roadmap builder, then AI generation) |

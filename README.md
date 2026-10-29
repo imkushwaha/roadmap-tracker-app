@@ -1,6 +1,6 @@
-# AI Engineer Roadmap — Progress Dashboard
+# Roadmap Tracker
 
-A single-page web application that converts `data/roadmap.md` (a structured 10-month Tier-1 AI Engineer career roadmap) into an interactive, multi-user progress tracker. Each user registers an account; progress is persisted per-user in [Turso](https://turso.tech) (hosted libSQL/SQLite) so the same state is visible from any device.
+A single-page web application for tracking progress through structured roadmaps. Every account starts with the built-in **AI Engineer Roadmap** (generated from `data/roadmap.md`, a 10-month Tier-1 AI Engineer career plan) and manages its roadmaps from a post-login dashboard. Each user registers an account; progress is persisted per-user, per-roadmap in [Turso](https://turso.tech) (hosted libSQL/SQLite) so the same state is visible from any device.
 
 ---
 
@@ -33,6 +33,14 @@ A single-page web application that converts `data/roadmap.md` (a structured 10-m
 ---
 
 ## Features
+
+**Roadmap dashboard** — after login you land on "Your roadmaps":
+- Every account is seeded with the **AI Engineer Roadmap**; **Open** it to use the views below, with a back arrow to return to the dashboard
+- **Delete** a roadmap (and its progress) — always behind a confirmation dialog
+- **Restore** the AI Engineer Roadmap (fresh progress) if you deleted it
+- **Create new roadmap** and **Create roadmap with AI** are shown as *Coming soon*
+
+Views inside a roadmap:
 
 | View | Description |
 |---|---|
@@ -129,7 +137,7 @@ Open http://localhost:3000, choose **Create an account**, and start tracking. Ex
 npm test
 ```
 
-All 41 tests cover auth flows, data save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
+All 51 tests cover auth flows, roadmap list/delete/restore, per-roadmap progress save/load, conflict detection, cross-user isolation, the `user_data` migration, rate limiting, schema validation, and static-file security.
 
 ### Regenerate Roadmap Data
 
@@ -152,28 +160,31 @@ roadmap-dashboard/
 │   └── styles.css                All styling (light + dark themes)
 │
 ├── js/
-│   ├── app.js                    UI state, rendering, autosave, auth
-│   ├── api.js                    HTTP client (AuthApi, DataApi, window.Api shim)
+│   ├── app.js                    UI state, rendering, dashboard, autosave, auth
+│   ├── api.js                    HTTP client (AuthApi, RoadmapApi)
 │   └── progress-schema.js        Progress data validator (UMD — browser + server)
 │
 ├── server/
 │   ├── index.js                  Entry point: loads config, connects to DB, starts server
 │   ├── app.js                    Express app factory (thin compositor)
 │   ├── config.js                 Env-var loader with fast-fail production validation
-│   ├── db.js                     Turso/libSQL connect + schema (SCHEMA_STATEMENTS)
+│   ├── db.js                     Turso/libSQL connect + schema + one-time user_data migration
 │   ├── auth/
 │   │   ├── service.js            Pure auth helpers: bcrypt, JWT, cookie options
-│   │   └── validators.js         Input validators: username, password
+│   │   └── validators.js         Input validators: username, password, name
+│   ├── roadmaps/
+│   │   └── builtin.js            Identity of the built-in AI Engineer roadmap
 │   └── routes/
-│       ├── auth.js               Router: /api/auth/register|login|logout|me
-│       └── data.js               Router: GET|PUT /api/data (atomic CAS)
+│       ├── auth.js               Router: /api/auth/register|login|logout|me|check-username
+│       └── roadmaps.js           Router: /api/roadmaps — list, restore, delete, progress GET|PUT (atomic CAS)
 │
 ├── scripts/
 │   └── md_to_json.py             Markdown → JSON/JS pipeline (RoadmapParser class)
 │
 ├── test/
 │   ├── helpers.js                Server bootstrap, cookie-jar client, fixtures
-│   ├── api.test.js               Integration tests: auth, data, conflicts, isolation
+│   ├── api.test.js               Integration tests: auth, progress, conflicts, isolation
+│   ├── roadmaps.test.js          Roadmap list/delete/restore, ownership, user_data migration
 │   ├── config.test.js            Unit tests for config loader
 │   └── schema.test.js            Unit tests for progress-schema validator
 │
@@ -219,8 +230,8 @@ graph TB
 graph LR
     subgraph Browser["Browser (Vanilla JS — no build step)"]
         html["index.html\nApp shell"]
-        appjs["js/app.js\nState · Rendering\nAutosave · Auth UI"]
-        apijs["js/api.js\nAuthApi / DataApi\nfetch wrapper"]
+        appjs["js/app.js\nState · Rendering · Dashboard\nAutosave · Auth UI"]
+        apijs["js/api.js\nAuthApi / RoadmapApi\nfetch wrapper"]
         schema["js/progress-schema.js\nClient-side validator\n(UMD)"]
     end
 
@@ -232,12 +243,14 @@ graph LR
 
         subgraph AuthLayer["Auth layer"]
             svc["auth/service.js\nbcrypt · JWT\nrequireAuth middleware"]
-            val["auth/validators.js\nUsername · Password"]
+            val["auth/validators.js\nUsername · Password · Name"]
         end
+
+        builtin["roadmaps/builtin.js\nStarter roadmap identity"]
 
         subgraph Routers["Routers"]
             authR["routes/auth.js\n/api/auth/*"]
-            dataR["routes/data.js\n/api/data"]
+            roadmapsR["routes/roadmaps.js\n/api/roadmaps/*"]
         end
 
         schsrv["js/progress-schema.js\nServer-side validator\n(same UMD file)"]
@@ -253,12 +266,15 @@ graph LR
     idx --> dbmod
     idx --> appfact
     appfact --> authR
-    appfact --> dataR
+    appfact --> roadmapsR
     appfact --> svc
     authR --> svc
     authR --> val
-    dataR --> svc
-    dataR --> schsrv
+    authR --> builtin
+    roadmapsR --> svc
+    roadmapsR --> schsrv
+    roadmapsR --> builtin
+    dbmod --> builtin
     dbmod --> Turso
 ```
 
@@ -273,25 +289,29 @@ graph TD
     cfg["server/config.js"]
     dbmod["server/db.js"]
     authR["routes/auth.js"]
-    dataR["routes/data.js"]
+    roadmapsR["routes/roadmaps.js"]
     svc["auth/service.js"]
     val["auth/validators.js"]
+    builtin["roadmaps/builtin.js"]
     schema["js/progress-schema.js"]
 
     idx --> cfg
     idx --> dbmod
     idx --> appfact
     appfact --> authR
-    appfact --> dataR
+    appfact --> roadmapsR
     appfact --> svc
     authR --> svc
     authR --> val
-    dataR --> schema
+    authR --> builtin
+    roadmapsR --> schema
+    roadmapsR --> builtin
+    dbmod --> builtin
 
     style svc fill:#d4edda
     style val fill:#d4edda
     style authR fill:#cce5ff
-    style dataR fill:#cce5ff
+    style roadmapsR fill:#cce5ff
     style appfact fill:#fff3cd
 ```
 
@@ -307,19 +327,30 @@ erDiagram
         integer id           PK  "AUTOINCREMENT"
         text    username     UK  "COLLATE NOCASE"
         text    password_hash    "bcrypt, cost 12"
+        text    first_name
+        text    last_name
         text    created_at       "ISO-8601 UTC"
     }
-    USER_DATA {
-        integer user_id      PK  "FK → users.id CASCADE DELETE"
+    ROADMAPS {
+        integer id           PK  "AUTOINCREMENT"
+        integer user_id      FK  "→ users.id CASCADE DELETE (indexed)"
+        text    name
+        text    description
+        text    source           "builtin_ai_engineer"
+        text    created_at       "ISO-8601 UTC"
+    }
+    ROADMAP_PROGRESS {
+        integer roadmap_id   PK  "FK → roadmaps.id CASCADE DELETE"
         text    data             "JSON progress blob"
         integer version          "Optimistic concurrency counter"
         text    updated_at       "ISO-8601 UTC"
     }
 
-    USERS ||--o| USER_DATA : "owns"
+    USERS ||--o{ ROADMAPS : "owns"
+    ROADMAPS ||--o| ROADMAP_PROGRESS : "has"
 ```
 
-One row in `user_data` per user. The `data` column stores the full progress JSON blob validated by `progress-schema.js` before every write. `version` implements compare-and-swap to prevent lost updates across devices.
+A user owns any number of roadmaps; each roadmap has at most one `roadmap_progress` row, created on its first save. The `data` column stores the full progress JSON blob validated by `progress-schema.js` before every write. `version` implements compare-and-swap to prevent lost updates across devices. Deleting a roadmap (or user) cascades to its progress.
 
 ---
 
@@ -335,14 +366,13 @@ sequenceDiagram
     participant DB as Turso (libSQL)
 
     Note over U,DB: Registration
-    U  ->> B:  Enter username + password
-    B  ->> AR: POST /api/auth/register {username, password}
-    AR ->> VA: validateUsername(username)
-    AR ->> VA: validatePassword(password)
+    U  ->> B:  Enter name, username + password
+    B  ->> AR: POST /api/auth/register {firstName, lastName, username, password}
+    AR ->> VA: validateName / validateUsername / validatePassword
     VA -->> AR: {valid: true}
     AR ->> SV: hashPassword(password, cost=12)
     SV -->> AR: bcrypt hash
-    AR ->> DB: INSERT INTO users (username, hash)
+    AR ->> DB: One transaction (batch): INSERT INTO users + INSERT INTO roadmaps (AI Engineer starter)
     DB -->> AR: lastInsertRowid
     AR ->> SV: signToken(user, secret, 7d)
     SV -->> AR: JWT
@@ -352,7 +382,7 @@ sequenceDiagram
     Note over U,DB: Subsequent request (rolling session)
     B  ->> AR: GET /api/auth/me (cookie sent)
     AR ->> SV: await getCurrentUser(req, db, secret)
-    SV ->> DB: SELECT id, username WHERE id = <sub>
+    SV ->> DB: SELECT id, username, first_name, last_name WHERE id = <sub>
     DB -->> SV: user row
     AR ->> SV: signToken(user, …)  [renew]
     AR ->> B:  200 {user} + refreshed cookie
@@ -367,21 +397,22 @@ sequenceDiagram
     actor U  as User
     participant B  as Browser
     participant MW as requireAuth middleware
-    participant DR as routes/data.js
+    participant DR as routes/roadmaps.js
     participant SC as js/progress-schema.js
     participant DB as Turso (libSQL)
 
     U  ->> B:  Mark task complete
     Note over B: Autosave fires ~1.5 s after last edit
-    B  ->> MW: PUT /api/data {data, version} + cookie
+    B  ->> MW: PUT /api/roadmaps/:id/progress {data, version} + cookie
     MW ->> DB: SELECT id, username WHERE id = <jwt.sub>
     DB -->> MW: user row
     MW ->> DR: next() — req.user set
 
+    DR ->> DB: SELECT roadmap WHERE id=? AND user_id=? (404 if not owned)
     DR ->> SC: validateProgress(data)
     SC -->> DR: {ok: true}
 
-    DR ->> DB: Atomic CAS: UPDATE user_data SET data=?, version=version+1<br/>WHERE user_id=? AND version=?<br/>(first save: INSERT … ON CONFLICT DO NOTHING)
+    DR ->> DB: Atomic CAS: UPDATE roadmap_progress SET data=?, version=version+1<br/>WHERE roadmap_id=? AND version=?<br/>(first save: INSERT … ON CONFLICT DO NOTHING)
 
     alt rowsAffected = 1 (client version matched)
         DB -->> DR: 1 row changed
@@ -389,7 +420,7 @@ sequenceDiagram
         B  -->> U: "Saved ✓"
     else rowsAffected = 0 (stale version — edited from another device)
         DB -->> DR: 0 rows changed
-        DR ->> DB: SELECT data, version, updated_at WHERE user_id=?
+        DR ->> DB: SELECT data, version, updated_at WHERE roadmap_id=?
         DB -->> DR: server row
         DR ->> B:  409 {error: "Version conflict", server: {data, version}}
         B  -->> U: Conflict dialog — Load server / Overwrite
@@ -502,23 +533,32 @@ All endpoints return and accept JSON. Sessions are managed via an httpOnly `Same
 
 | Method | Path | Request body | Response |
 |---|---|---|---|
-| `POST` | `/api/auth/register` | `{username, password}` | `201 {user}` · `400` validation error · `409` username taken |
+| `POST` | `/api/auth/register` | `{firstName, lastName, username, password}` | `201 {user}` (also creates the starter roadmap) · `400` validation error · `409` username taken |
 | `POST` | `/api/auth/login` | `{username, password}` | `200 {user}` · `401 Invalid credentials` |
 | `POST` | `/api/auth/logout` | — | `204` (clears cookie) |
 | `GET` | `/api/auth/me` | — | `200 {user}` (renews session) · `401` |
+| `GET` | `/api/auth/check-username?username=` | — | `200 {available}` · `400` invalid username |
 
-**Rate limits:** 10 requests per 15 minutes per IP. Only **failed** logins count toward the login limit.  
+`user` is `{username, firstName, lastName}`.
+
+**Rate limits:** 10 requests per 15 minutes per IP (30 for `check-username`). Only **failed** logins count toward the login limit.  
+**Name rules:** first and last name, 1–64 letters (accents, spaces, `'` and `-` allowed).  
 **Username rules:** 3–32 characters — letters, digits, `_`, `-`. Case-insensitive uniqueness; original casing preserved.  
 **Password rules:** 8–72 bytes UTF-8 (bcrypt limit).
 
-### Data endpoints — `/api/data`
+### Roadmap endpoints — `/api/roadmaps`
+
+All require a session (`401` otherwise). A roadmap id that doesn't exist, is malformed, or belongs to another user returns `404 Roadmap not found`.
 
 | Method | Path | Request body | Response |
 |---|---|---|---|
-| `GET` | `/api/data` | — | `200 {data, version, updatedAt}` · `{data:null, version:0}` for new users |
-| `PUT` | `/api/data` | `{data, version}` | `200 {version, updatedAt}` · `400` schema error · `409` version conflict · `413` body > 5 MB |
+| `GET` | `/api/roadmaps` | — | `200 {roadmaps: [{id, name, description, source, createdAt, lastActivityAt}]}` — `lastActivityAt` is `null` until the first save |
+| `POST` | `/api/roadmaps` | `{source: "builtin_ai_engineer"}` | `201 {roadmap}` (restore the starter roadmap) · `400` any other source · `409` you already have it |
+| `DELETE` | `/api/roadmaps/:id` | — | `204` (progress cascades) · `404` |
+| `GET` | `/api/roadmaps/:id/progress` | — | `200 {roadmap, data, version, updatedAt}` · `{roadmap, data:null, version:0}` before the first save · `404` |
+| `PUT` | `/api/roadmaps/:id/progress` | `{data, version}` | `200 {version, updatedAt}` · `400` schema error · `404` · `409` version conflict · `413` body > 5 MB |
 
-The `PUT` endpoint uses **compare-and-swap** in a single atomic statement (`UPDATE … WHERE user_id = ? AND version = ?`, or `INSERT … ON CONFLICT DO NOTHING` for a first save with `version: 0`). If no row changes because the server's current version differs from `version` in the request, the server row is read and a `409` is returned with it so the client can resolve the conflict.
+The progress `PUT` uses **compare-and-swap** in a single atomic statement (`UPDATE … WHERE roadmap_id = ? AND version = ?`, or `INSERT … ON CONFLICT DO NOTHING` for a first save with `version: 0`). If no row changes because the server's current version differs from `version` in the request, the server row is read and a `409 {error, server: {data, version, updatedAt}}` is returned so the client can resolve the conflict. Creating custom roadmaps is not available yet (Coming soon).
 
 ### Static files served
 
@@ -565,7 +605,7 @@ Roadmap (data/roadmap.json — generated, read-only)
 ```
 
 ```
-Progress (Turso user_data.data — per-user, server-persisted)
+Progress (Turso roadmap_progress.data — per-roadmap, server-persisted)
 ├─ items{}         { [taskId]: { status, notes, link, dueDate, completedAt } }
 ├─ counters{}      { [counterId]: currentValue }
 ├─ celebratedPhases[]   Phase IDs where the completion celebration has fired
@@ -589,7 +629,8 @@ The test suite uses Node's built-in `node:test` runner — no Jest, no Mocha. Ea
 
 | Test file | Coverage |
 |---|---|
-| `test/api.test.js` | Auth flows, data round-trips, version conflicts, cross-user isolation, rate limiting, static-file security |
+| `test/api.test.js` | Auth flows, progress round-trips, version conflicts, cross-user isolation, rate limiting, static-file security |
+| `test/roadmaps.test.js` | Starter roadmap seeding, list/delete/restore, ownership (404s), atomic registration, one-time `user_data` migration |
 | `test/config.test.js` | Config loader — env vars, production guards, defaults |
 | `test/schema.test.js` | Progress schema validator — valid/invalid shapes, `__proto__` injection, custom months |
 
@@ -641,7 +682,9 @@ turso db show roadmap-dashboard --url          # → TURSO_DATABASE_URL (libsql:
 turso db tokens create roadmap-dashboard       # → TURSO_AUTH_TOKEN (keep secret)
 ```
 
-The schema (`users`, `user_data`) is created automatically on first start (`CREATE TABLE IF NOT EXISTS`).
+The schema (`users`, `roadmaps`, `roadmap_progress`) is created automatically on first start (`CREATE TABLE IF NOT EXISTS`).
+
+**Upgrading an existing database:** if a legacy `user_data` table is found on startup, a one-time migration (a single transaction) gives every account the AI Engineer roadmap, copies each user's saved progress into `roadmap_progress`, then **renames** `user_data` to `user_data_legacy` (nothing is dropped). On later boots there is no `user_data`, so the migration is a no-op and deleted roadmaps are never re-seeded. Deploy as a single switch: an older server instance still running would break once the table is renamed.
 
 ### Running anywhere
 
@@ -706,7 +749,8 @@ The codebase follows **SOLID** principles throughout:
 | `auth/service.js` | bcrypt and JWT operations — no Express |
 | `auth/validators.js` | Input validation rules — no DB access |
 | `routes/auth.js` | HTTP auth route handlers |
-| `routes/data.js` | HTTP data route handlers |
+| `routes/roadmaps.js` | HTTP roadmap + progress route handlers |
+| `roadmaps/builtin.js` | Identity of the built-in starter roadmap |
 | `server/app.js` | Compose middleware and routers — no business logic |
 | `server/config.js` | Parse and validate environment variables |
 | `server/db.js` | Connect to Turso/libSQL, apply schema |
@@ -721,12 +765,12 @@ The codebase follows **SOLID** principles throughout:
 ### Dependency Inversion
 
 - `auth/service.js` wraps `bcryptjs` and `jsonwebtoken` so route handlers (`routes/auth.js`) depend on the wrapper, not the library.
-- `createDataRouter` receives `requireAuth` as a parameter rather than importing it directly, making it testable with a substitute middleware.
+- `createRoadmapsRouter` receives `requireAuth` as a parameter rather than importing it directly, making it testable with a substitute middleware.
 - `RoadmapParser` accepts `list[str]` (lines) rather than a file path, separating I/O (`load_lines`) from parsing.
 
 ### Interface Segregation
 
-- `js/api.js` exposes `AuthApi` (me, login, register, logout) and `DataApi` (getData, putData) as separate objects. Client code that only needs data sync does not depend on the auth surface. A combined `window.Api` shim is provided for backwards compatibility.
+- `js/api.js` exposes `AuthApi` (me, login, register, checkUsername, logout) and `RoadmapApi` (list, restoreBuiltin, remove, getProgress, putProgress) as separate objects. Client code that only needs roadmap sync does not depend on the auth surface.
 
 ---
 

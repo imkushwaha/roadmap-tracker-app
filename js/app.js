@@ -60,7 +60,7 @@
   // Every mutation calls persist(); it now just flags the data as changed and
   // schedules a debounced save to the server (see "Server sync" below).
   function persist() {
-    if (!session.username) return;
+    if (!session.username || session.roadmapId == null) return;
     session.dirty = true;
     if (session.conflict) return;
     if (session.saving) { setSaveStatus("saving"); return; }
@@ -1532,6 +1532,7 @@
     if (action === "close-modal") closeModal();
     if (action === "save-modal") saveModal(e.target.dataset.id);
     if (action === "confirm-reset") doReset();
+    if (action === "confirm-delete-roadmap") deleteRoadmap(Number(e.target.dataset.id));
     if (action === "save-start-month") saveStartMonth();
     if (action === "conflict-load") resolveConflictLoadServer();
     if (action === "conflict-overwrite") resolveConflictOverwrite();
@@ -1635,7 +1636,8 @@
   const RETRY_DELAYS_MS = [2000, 5000, 15000];
 
   const session = {
-    username: null,     // set once data has loaded; persist() is a no-op before that
+    username: null,     // set while authenticated; persist() is a no-op without it
+    roadmapId: null,    // the open roadmap; null while on the dashboard
     version: 0,         // server version our copy is based on
     dirty: false,       // local changes not yet confirmed saved
     saving: false,      // a PUT is in flight
@@ -1669,14 +1671,14 @@
   }
 
   async function flushSave() {
-    if (session.saving || !session.dirty || session.conflict || !session.username) return;
+    if (session.saving || !session.dirty || session.conflict || !session.username || session.roadmapId == null) return;
     clearTimeout(session.timer);
     session.saving = true;
     session.dirty = false;
     setSaveStatus("saving");
     const snapshot = JSON.parse(JSON.stringify(progress));
     try {
-      const r = await window.Api.putData(snapshot, session.version);
+      const r = await window.RoadmapApi.putProgress(session.roadmapId, snapshot, session.version);
       session.version = r.version;
       session.retries = 0;
       session.saving = false;
@@ -1791,6 +1793,7 @@
   function showAuth(mode, notice, opts) {
     opts = opts || {};
     lockApp();
+    hideDashboard();
     setAuthMode(mode || "login");
     const n = $("authNotice");
     n.textContent = notice || "";
@@ -1856,7 +1859,7 @@
       $("authPassword").value = "";
       $("authConfirmPassword").value = "";
       session.expiredFor = null;
-      await loadUserData(res.user.username, res.user.firstName || "", res.user.lastName || "");
+      enterDashboard(res.user);
     } catch (e) {
       err.textContent = e.message;
     } finally {
@@ -1868,63 +1871,235 @@
     showBlock("Loading…", "");
     let me;
     try {
-      me = await window.Api.me();
+      me = await window.AuthApi.me();
     } catch (e) {
       if (e.status === 401) { showAuth("login"); return; }
       showBlock("Can't reach the server", e.message, [["Retry", boot]]);
       return;
     }
-    await loadUserData(me.user.username, me.user.firstName || "", me.user.lastName || "");
+    enterDashboard(me.user);
   }
 
-  async function loadUserData(username, firstName, lastName) {
-    firstName = firstName || "";
-    lastName  = lastName  || "";
-    showBlock("Loading your data…", "");
+  // Reset every piece of per-roadmap sync state; the account fields are kept.
+  function resetRoadmapSession(roadmapId, version) {
+    clearTimeout(session.timer);
+    Object.assign(session, { roadmapId, version, dirty: false, saving: false,
+      conflict: false, conflictServer: null, retries: 0, expiredFor: null });
+  }
+
+  // Called once the user is authenticated: lands them on the roadmap dashboard.
+  function enterDashboard(user) {
+    const firstName = user.firstName || "";
+    const lastName = user.lastName || "";
+    Object.assign(session, { username: user.username, firstName, lastName });
+    resetRoadmapSession(null, 0);
+    progress = normalizeProgress(null);
+    const fullName = [firstName, lastName].filter(Boolean).join(" ") || user.username;
+    $("profileName").textContent = fullName;
+    $("panelFullName").textContent = fullName;
+    $("panelUsername").textContent = "@" + user.username;
+    $("dashboardGreeting").textContent = "Signed in as " + fullName;
+    hideAuth();
+    showDashboard();
+  }
+
+  // ---------------------------------------------------------
+  // Roadmap dashboard (post-login landing page)
+  // ---------------------------------------------------------
+  let dashboardRoadmaps = [];
+
+  function hideDashboard() { $("dashboardScreen").classList.add("hidden"); }
+
+  async function showDashboard() {
+    lockApp();
+    document.title = "Roadmap Tracker";
+    $("dashboardScreen").classList.remove("hidden");
+    $("dashboardContent").innerHTML = `<p class="dashboard-status">Loading your roadmaps…</p>`;
     let res;
     try {
-      res = await window.Api.getData();
+      res = await window.RoadmapApi.list();
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      $("dashboardContent").innerHTML = `
+        <div class="dashboard-status">
+          <p>Couldn't load your roadmaps: ${esc(e.message)}</p>
+          <button type="button" class="btn btn-primary" data-action="retry-dashboard">Retry</button>
+        </div>`;
+      return;
+    }
+    renderDashboard(res.roadmaps);
+  }
+
+  function describeActivity(iso) {
+    if (!iso) return "Not started yet";
+    const days = daysBetween(new Date(iso), new Date());
+    if (days <= 0) return "Last activity today";
+    if (days === 1) return "Last activity yesterday";
+    return "Last activity " + days + " days ago";
+  }
+
+  function renderDashboard(roadmaps) {
+    const cards = roadmaps.map((r) => `
+      <article class="roadmap-card">
+        <div>
+          <h3>${esc(r.name)}</h3>
+          ${r.description ? `<p class="roadmap-card-desc">${esc(r.description)}</p>` : ""}
+          <p class="roadmap-card-meta">${esc(describeActivity(r.lastActivityAt))}</p>
+        </div>
+        <div class="roadmap-card-actions">
+          <button type="button" class="btn btn-primary btn-open" data-action="open-roadmap" data-id="${r.id}">Open</button>
+          <button type="button" class="btn btn-ghost-danger" data-action="delete-roadmap" data-id="${r.id}"
+                  aria-label="Delete ${esc(r.name)}">Delete</button>
+        </div>
+      </article>`);
+
+    // Offer the starter roadmap back whenever the account no longer has it.
+    const restore = roadmaps.some((r) => r.source === "builtin_ai_engineer") ? "" : `
+      <button type="button" class="roadmap-card action" data-action="restore-builtin">
+        <span class="action-title">↺ Restore AI Engineer Roadmap</span>
+        <span class="action-desc">Bring back the 10-month starter roadmap with fresh progress.</span>
+      </button>`;
+
+    $("dashboardContent").innerHTML = `
+      <h2>Your roadmaps</h2>
+      <p class="dashboard-lead">${roadmaps.length
+        ? "Pick up where you left off."
+        : "You don't have any roadmaps yet."}</p>
+      <div class="roadmap-grid">
+        ${cards.join("")}
+        ${restore}
+        <button type="button" class="roadmap-card action" disabled>
+          <span class="action-title">+ Create new roadmap <span class="coming-soon-badge">Coming soon</span></span>
+          <span class="action-desc">Build your own plan: months, modules and tasks.</span>
+        </button>
+        <button type="button" class="roadmap-card action" disabled>
+          <span class="action-title">✦ Create roadmap with AI <span class="coming-soon-badge">Coming soon</span></span>
+          <span class="action-desc">Describe a goal and let AI draft the plan.</span>
+        </button>
+      </div>`;
+    dashboardRoadmaps = roadmaps;
+  }
+
+  async function restoreBuiltinRoadmap() {
+    try {
+      await window.RoadmapApi.restoreBuiltin();
+      toast("AI Engineer Roadmap restored.", "success");
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      if (e.status !== 409) { toast("Couldn't restore the roadmap: " + e.message, "error"); return; }
+    }
+    showDashboard();
+  }
+
+  function confirmDeleteRoadmap(id) {
+    const roadmap = dashboardRoadmaps.find((r) => String(r.id) === String(id));
+    if (!roadmap) return;
+    const host = $("modalHost");
+    host.querySelector(".modal").innerHTML = `
+      <h2>Delete “${esc(roadmap.name)}”?</h2>
+      <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+        This permanently deletes the roadmap and all of its progress — statuses, notes, links, due dates
+        and anything you added. This can't be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn" data-action="close-modal">Cancel</button>
+        <button class="btn btn-danger" data-action="confirm-delete-roadmap" data-id="${roadmap.id}">Delete roadmap</button>
+      </div>`;
+    host.classList.remove("hidden");
+  }
+
+  async function deleteRoadmap(id) {
+    closeModal();
+    try {
+      await window.RoadmapApi.remove(id);
+      toast("Roadmap deleted.", "success");
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      if (e.status !== 404) { toast("Couldn't delete the roadmap: " + e.message, "error"); return; }
+    }
+    showDashboard();
+  }
+
+  async function openRoadmap(id) {
+    hideDashboard();
+    showBlock("Loading roadmap…", "");
+    let res;
+    try {
+      res = await window.RoadmapApi.getProgress(id);
     } catch (e) {
       if (e.status === 401) { showAuth("login"); return; }
       // Never fall through to an empty editable state: saving it would overwrite real data.
-      showBlock("Couldn't load your data", e.message, [["Retry", () => loadUserData(username, firstName, lastName)], ["Log out", logout]]);
+      showBlock("Couldn't load this roadmap", e.message, [
+        ["Retry", () => openRoadmap(id)],
+        ["Back to roadmaps", () => { hideAuth(); showDashboard(); }],
+      ]);
       return;
     }
-    clearTimeout(session.timer);
-    Object.assign(session, { username, firstName, lastName, version: res.version || 0, dirty: false,
-      saving: false, conflict: false, conflictServer: null, retries: 0, expiredFor: null });
+    resetRoadmapSession(res.roadmap.id, res.version || 0);
     progress = normalizeProgress(res.data);
     rebuildIndex();
     hideAuth();
     unlockApp();
-    const fullName = [firstName, lastName].filter(Boolean).join(" ") || username;
-    $("profileName").textContent = fullName;
-    $("panelFullName").textContent = fullName;
-    $("panelUsername").textContent = "@" + username;
+    $("roadmapTitle").textContent = res.roadmap.name;
+    $("roadmapSubtitle").textContent = res.roadmap.description;
+    document.title = res.roadmap.name + " — Roadmap Tracker";
+    state.search = "";
+    $("panelSearch").value = "";
     setSaveStatus("saved");
-    rerender();
+    setView("overview");
     checkMilestones();
-    if (res.data === null && readLegacyLocalData()) openLegacyModal(false);
+    if (res.data === null && res.roadmap.source === "builtin_ai_engineer" && readLegacyLocalData()) {
+      openLegacyModal(false);
+    }
+  }
+
+  // Flush pending edits before leaving the open roadmap; false if the user chose to stay.
+  async function settleUnsavedChanges(verb) {
+    if (session.username && session.roadmapId != null && (session.dirty || session.saving)) {
+      await flushNow();
+      if (session.dirty && !window.confirm(`Some changes haven't been saved yet. ${verb} anyway and lose them?`)) return false;
+    }
+    return true;
+  }
+
+  async function backToDashboard() {
+    if (!(await settleUnsavedChanges("Leave"))) return;
+    resetRoadmapSession(null, 0);
+    progress = normalizeProgress(null);
+    closeModal();
+    showDashboard();
+  }
+
+  function onDashboardClick(e) {
+    const el = e.target.closest("[data-action]");
+    if (!el) return;
+    switch (el.dataset.action) {
+      case "open-roadmap": openRoadmap(Number(el.dataset.id)); break;
+      case "delete-roadmap": confirmDeleteRoadmap(el.dataset.id); break;
+      case "restore-builtin": restoreBuiltinRoadmap(); break;
+      case "retry-dashboard": showDashboard(); break;
+      default: break;
+    }
   }
 
   function handleSessionExpired() {
+    const hadRoadmap = session.roadmapId != null;
     clearTimeout(session.timer);
     session.expiredFor = session.username;
     session.username = null;
     setSaveStatus("idle");
     closeModal();
     showAuth("login",
-      "Your session expired, so your latest changes couldn't be saved. Log in again to keep working. " +
-      "If you made changes you want to keep, download them first.",
-      { offerDownload: true });
+      hadRoadmap
+        ? "Your session expired, so your latest changes couldn't be saved. Log in again to keep working. " +
+          "If you made changes you want to keep, download them first."
+        : "Your session expired. Log in again to continue.",
+      { offerDownload: hadRoadmap });
   }
 
   async function logout() {
-    if (session.username && (session.dirty || session.saving)) {
-      await flushNow();
-      if (session.dirty && !window.confirm("Some changes haven't been saved yet. Log out anyway and lose them?")) return;
-    }
-    try { await window.Api.logout(); } catch (e) { /* cookie may already be gone */ }
+    if (!(await settleUnsavedChanges("Log out"))) return;
+    try { await window.AuthApi.logout(); } catch (e) { /* cookie may already be gone */ }
     // A full reload drops every piece of in-memory, user-specific state.
     window.location.reload();
   }
@@ -2011,6 +2186,9 @@
     $("authPassword").addEventListener("input", updatePasswordMatch);
     $("authConfirmPassword").addEventListener("input", updatePasswordMatch);
     $("logoutBtn").addEventListener("click", logout);
+    $("dashboardLogoutBtn").addEventListener("click", logout);
+    $("backToDashboardBtn").addEventListener("click", backToDashboard);
+    $("dashboardContent").addEventListener("click", onDashboardClick);
     $("panelSaveStatus").addEventListener("click", () => {
       const kind = $("panelSaveStatus").dataset.kind;
       if (kind === "error") { session.retries = 0; flushSave(); }

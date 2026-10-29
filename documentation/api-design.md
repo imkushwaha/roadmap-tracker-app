@@ -12,8 +12,8 @@ http://localhost:3000/api
 ### Authentication Transport
 Session token is a **JWT stored in an httpOnly cookie** (`rd_session`). Browsers send it automatically on every same-origin `fetch()` call with `credentials: "same-origin"`. The cookie is never readable by JavaScript, protecting against XSS theft.
 
-### Global Rate Limiting
-All `/api` routes share a rate limit: **10 requests per 15-minute window per IP** (configurable). Failed login attempts have an additional sub-limit to slow brute-force attacks.
+### Rate Limiting
+The `/api/auth` endpoints `register` and `login` are limited to **10 requests per 15-minute window per IP** (configurable); only **failed** logins count toward the login limit. `GET /api/auth/check-username` has its own, looser limit of 30 per window. Roadmap routes (`/api/roadmaps`) are not rate-limited; they require a valid session.
 
 ### Common Error Shape
 ```json
@@ -37,6 +37,8 @@ Creates a new user account and starts a session.
 **Request body**
 ```json
 {
+  "firstName": "Alice",
+  "lastName": "Smith",
   "username": "alice",
   "password": "mypassword"
 }
@@ -46,25 +48,28 @@ Creates a new user account and starts a session.
 
 | Field | Rule |
 |-------|------|
+| `firstName`, `lastName` | 1–64 characters, letters (including accented), space, `'` or `-` |
 | `username` | 3–32 characters, pattern `/^[A-Za-z0-9_-]+$/` |
 | `password` | 8–72 bytes |
 
 **Success — 201 Created**
 ```json
 {
-  "user": { "username": "alice" }
+  "user": { "username": "alice", "firstName": "Alice", "lastName": "Smith" }
 }
 ```
 Sets `rd_session` cookie (httpOnly, SameSite=Lax, 7-day TTL).
 
+The user row and the starter **AI Engineer Roadmap** row are inserted in a single transaction (`db.batch`), so an account never exists without its starter roadmap. A rejected duplicate username leaves nothing behind.
+
 **Failure — 400 Bad Request** (validation failure)
 ```json
-{ "error": "Username must be 3–32 characters and contain only letters, numbers, _ or -" }
+{ "error": "Username must be 3-32 characters: letters, numbers, _ or -." }
 ```
 
 **Failure — 409 Conflict** (username taken)
 ```json
-{ "error": "Username already taken" }
+{ "error": "That username is already taken." }
 ```
 
 ---
@@ -84,7 +89,7 @@ Authenticates an existing user and starts a session.
 **Success — 200 OK**
 ```json
 {
-  "user": { "username": "alice" }
+  "user": { "username": "alice", "firstName": "Alice", "lastName": "Smith" }
 }
 ```
 Sets `rd_session` cookie.
@@ -117,7 +122,7 @@ Returns the currently authenticated user and issues a **rolling session** (refre
 **Success — 200 OK**
 ```json
 {
-  "user": { "username": "alice" }
+  "user": { "username": "alice", "firstName": "Alice", "lastName": "Smith" }
 }
 ```
 Sets refreshed `rd_session` cookie.
@@ -129,21 +134,124 @@ Sets refreshed `rd_session` cookie.
 
 ---
 
-## 3. Data Endpoints — `/api/data`
+### GET `/api/auth/check-username?username=<value>`
 
-All data endpoints require a valid `rd_session` cookie. Each user's data is isolated — a user can only read and write their own `ProgressStore`.
+Reports whether a username is free, for live feedback on the registration form. No session required. Rate limit: 30 requests per window per IP.
+
+**Success — 200 OK**
+```json
+{ "available": true }
+```
+
+**Failure — 400 Bad Request** (value fails the username rules)
+```json
+{ "error": "Username must be 3-32 characters: letters, numbers, _ or -." }
+```
 
 ---
 
-### GET `/api/data`
+## 3. Roadmap Endpoints — `/api/roadmaps`
 
-Returns the authenticated user's stored progress data.
+Every account owns zero or more roadmaps. A new account starts with one: the built-in **AI Engineer Roadmap** (`source: "builtin_ai_engineer"`), whose content is the static `data/roadmap.js` bundle; only its metadata and the user's progress are stored per account. Progress data is stored **per roadmap**.
 
-**Requires:** valid `rd_session` cookie.
+All routes require a valid `rd_session` cookie (`401 {"error":"Not authenticated"}` otherwise) and every query is scoped to the authenticated user. A roadmap that doesn't exist, belongs to someone else, or has a malformed `:id` (`abc`, `0`, `1.5`, `-1`) yields `404 {"error":"Roadmap not found"}` — the API never reveals whether another user's roadmap exists.
 
-**Success — 200 OK** (user has saved data)
+The old `/api/data` endpoints no longer exist; their behaviour moved to `/api/roadmaps/:id/progress`.
+
+**Roadmap summary shape**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | integer | |
+| `name` | string | |
+| `description` | string | May be empty |
+| `source` | string | `"builtin_ai_engineer"` today |
+| `createdAt` | string | ISO-8601 UTC |
+| `lastActivityAt` | string \| null | Only in the list response: when progress was last saved; `null` if never |
+
+---
+
+### GET `/api/roadmaps`
+
+Lists the user's roadmaps, oldest first. Returns metadata only (no progress data).
+
+**Success — 200 OK**
 ```json
 {
+  "roadmaps": [
+    {
+      "id": 2,
+      "name": "AI Engineer Roadmap",
+      "description": "Tier-1 Production AI Engineer — 10-Month Execution Tracker",
+      "source": "builtin_ai_engineer",
+      "createdAt": "2026-10-29T10:33:41.960Z",
+      "lastActivityAt": null
+    }
+  ]
+}
+```
+A user who deleted every roadmap gets `{ "roadmaps": [] }`.
+
+---
+
+### POST `/api/roadmaps`
+
+Currently only **restores the built-in AI Engineer roadmap** after it was deleted. Creating custom roadmaps is planned for a later phase.
+
+**Request body**
+```json
+{ "source": "builtin_ai_engineer" }
+```
+
+**Success — 201 Created** — a fresh roadmap with no saved progress (`version: 0`)
+```json
+{
+  "roadmap": {
+    "id": 3,
+    "name": "AI Engineer Roadmap",
+    "description": "Tier-1 Production AI Engineer — 10-Month Execution Tracker",
+    "source": "builtin_ai_engineer",
+    "createdAt": "2026-10-29T10:33:42.947Z"
+  }
+}
+```
+
+**Failure — 400 Bad Request** (`source` missing or anything other than `builtin_ai_engineer`)
+```json
+{ "error": "Only the AI Engineer roadmap can be created right now." }
+```
+
+**Failure — 409 Conflict** (the user already has one)
+```json
+{ "error": "You already have this roadmap." }
+```
+
+---
+
+### DELETE `/api/roadmaps/:id`
+
+Permanently deletes the roadmap. Its `roadmap_progress` row is removed by `ON DELETE CASCADE`. The UI asks for confirmation before calling this; the API itself does not.
+
+**Success — 204 No Content** *(empty body)*
+
+**Failure — 404 Not Found** — unknown id, not the caller's, or already deleted.
+
+---
+
+### GET `/api/roadmaps/:id/progress`
+
+Returns the roadmap's metadata together with the progress saved against it.
+
+**Success — 200 OK** (progress has been saved)
+```json
+{
+  "roadmap": {
+    "id": 2,
+    "name": "AI Engineer Roadmap",
+    "description": "Tier-1 Production AI Engineer — 10-Month Execution Tracker",
+    "source": "builtin_ai_engineer",
+    "createdAt": "2026-10-29T10:33:41.960Z"
+  },
   "data": {
     "items": {
       "subtask-abc": {
@@ -164,26 +272,18 @@ Returns the authenticated user's stored progress data.
 }
 ```
 
-**Success — 200 OK** (new user, no data saved yet)
+**Success — 200 OK** (nothing saved yet) — `data` is `null` and `version` is `0`; `updatedAt` is absent.
 ```json
-{
-  "data": null,
-  "version": 0
-}
+{ "roadmap": { ... }, "data": null, "version": 0 }
 ```
 
-**Failure — 401 Unauthorized**
-```json
-{ "error": "Not authenticated" }
-```
+**Failure — 401 / 404** as described above.
 
 ---
 
-### PUT `/api/data`
+### PUT `/api/roadmaps/:id/progress`
 
-Saves (creates or replaces) the authenticated user's progress data. Uses **optimistic concurrency control**: the client must pass the `version` it last read. If the server's version has changed (another tab or device saved in the meantime), the server returns 409 with its current copy so the client can resolve the conflict.
-
-**Requires:** valid `rd_session` cookie.
+Saves (creates or replaces) the progress for one roadmap. Uses **optimistic concurrency control**: the client passes the `version` it last read. If the stored version has changed (another tab or device saved in the meantime), the server returns 409 with its current copy so the client can resolve the conflict.
 
 **Request body**
 ```json
@@ -196,7 +296,7 @@ Saves (creates or replaces) the authenticated user's progress data. Uses **optim
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `data` | object | Yes | Must pass `validateProgress()` schema check |
-| `version` | integer | Yes | Must match current server `version`; use `0` for first-ever save |
+| `version` | integer | Yes | Non-negative; must match the stored `version`; use `0` for the first-ever save |
 
 **Body size limit:** 5 MB.
 
@@ -209,20 +309,20 @@ Saves (creates or replaces) the authenticated user's progress data. Uses **optim
 ```
 The client should update its local `session.version` to the returned `version`.
 
-**Failure — 400 Bad Request** (invalid body or schema violation)
+**Failure — 400 Bad Request** (`version` not a non-negative integer, or schema violation)
+```json
+{ "error": "\"version\" must be a non-negative integer." }
+```
 ```json
 {
-  "error": "Invalid progress data",
-  "details": ["items.subtask-xyz.status must be one of: not_started, in_progress, completed, blocked"]
+  "error": "Data doesn't match the progress schema.",
+  "details": ["items.subtask-xyz.status must be one of not_started, in_progress, completed, blocked."]
 }
 ```
 
-**Failure — 401 Unauthorized**
-```json
-{ "error": "Not authenticated" }
-```
+**Failure — 401 Unauthorized / 404 Not Found** as described above. Ownership is checked first, so a foreign or unknown roadmap is a 404 even when the body is also invalid.
 
-**Failure — 409 Conflict** (version mismatch)
+**Failure — 409 Conflict** (version mismatch, including a non-zero `version` for a roadmap with no saved progress)
 ```json
 {
   "error": "Version conflict",
@@ -233,11 +333,11 @@ The client should update its local `session.version` to the returned `version`.
   }
 }
 ```
-The client receives the server's current copy and presents the user with a conflict resolution dialog (keep server version or overwrite with local).
+For a roadmap with no saved progress the `server` object is `{ "data": null, "version": 0 }`. The client presents a conflict dialog (keep server version or overwrite with local).
 
 **Failure — 413 Payload Too Large**
 ```json
-{ "error": "Request body too large" }
+{ "error": "Request body too large (limit 5 MB)." }
 ```
 
 ---
@@ -263,11 +363,12 @@ These paths serve the application assets. They are an explicit allowlist — all
 | Code | Meaning | Used When |
 |------|---------|-----------|
 | 200 | OK | Successful GET or PUT |
-| 201 | Created | Successful register |
-| 204 | No Content | Successful logout |
+| 201 | Created | Successful register; restoring the AI Engineer roadmap |
+| 204 | No Content | Successful logout; successful roadmap delete |
 | 400 | Bad Request | Missing fields, validation failure |
 | 401 | Unauthorized | Missing or invalid session cookie |
-| 409 | Conflict | Username taken (register) or version mismatch (PUT /data) |
+| 404 | Not Found | Roadmap id unknown, malformed, or owned by another user |
+| 409 | Conflict | Username taken (register), version mismatch (PUT progress), or roadmap already exists (POST /api/roadmaps) |
 | 413 | Payload Too Large | Request body > 5 MB |
 | 429 | Too Many Requests | Rate limit exceeded |
 | 500 | Internal Server Error | Unexpected server fault |
@@ -276,7 +377,7 @@ These paths serve the application assets. They are an explicit allowlist — all
 
 ## 6. Conflict Resolution Protocol
 
-The PUT `/api/data` endpoint implements a **compare-and-swap** pattern:
+The PUT `/api/roadmaps/:id/progress` endpoint implements a **compare-and-swap** pattern, independently for each roadmap:
 
 ```
 Client                          Server
@@ -306,5 +407,6 @@ On 409, `app.js` opens a modal presenting the user with two options:
 - **SameSite=Lax** prevents CSRF on cross-site navigations.
 - **Anti-enumeration** on login: identical response for wrong-password and unknown-user.
 - **Rate limiting** limits brute-force login attempts.
-- **5 MB body limit** on PUT `/api/data` prevents DoS via large payload.
+- **5 MB body limit** on PUT `/api/roadmaps/:id/progress` prevents DoS via large payload.
+- **Per-user scoping:** every roadmap query filters on the session user's id, never on request input; another user's roadmap is indistinguishable from a missing one (404).
 - **Schema validation** on every write prevents malformed data from reaching the database.

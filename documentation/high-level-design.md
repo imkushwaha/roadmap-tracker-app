@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-The Roadmap Dashboard is a **10-month AI Engineer learning roadmap tracker**. It lets a registered user work through a structured curriculum (phases → sections → topics → subtasks), record their progress, add custom content, and visualise completion across multiple views. All progress data is stored on the server, tied to the authenticated user account, with optimistic concurrency control to handle multi-tab edits.
+The Roadmap Dashboard (branded **Roadmap Tracker**) is a multi-roadmap progress tracker. After logging in, a user lands on a **roadmap dashboard** listing their roadmaps and can open one, delete one (after confirmation), or restore the built-in one. Every account starts with the **AI Engineer Roadmap** — a 10-month curriculum (phases → sections → topics → subtasks) — where the user records progress, adds custom content, and visualises completion across multiple views. Progress is stored on the server **per roadmap**, tied to the authenticated user account, with optimistic concurrency control to handle multi-tab edits. Creating custom roadmaps ("Create new roadmap", "Create with AI") is shown as *coming soon* and is planned for later phases.
 
 The application is a **zero-build web app**: the frontend is plain HTML, CSS, and ES2022 JavaScript loaded directly by the browser. There is no compilation step, no bundler, and no frontend framework. The backend is an Express 5 server backed by a Turso (hosted libSQL, SQLite-compatible) database.
 
@@ -17,11 +17,13 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 │  index.html                                                 │
 │  ├── css/styles.css          (all styles)                   │
 │  ├── js/progress-schema.js   (UMD validator, shared)        │
-│  ├── js/api.js               (fetch wrappers: AuthApi/DataApi)│
-│  ├── data/roadmap.js         (static roadmap content)       │
-│  └── js/app.js               (entire SPA logic, ~1961 lines) │
+│  ├── js/api.js               (fetch wrappers: AuthApi /     │
+│  │                            RoadmapApi)                   │
+│  ├── data/roadmap.js         (static AI Engineer content)   │
+│  └── js/app.js               (entire SPA logic)             │
 │                                                             │
-│  Views rendered into <main id="main">:                      │
+│  Screens: auth · roadmap dashboard · roadmap views          │
+│  Roadmap views rendered into <main id="main">:              │
 │  overview · timeline · kanban · checklist · thisweek        │
 │  mastery · reference                                        │
 └──────────────────┬──────────────────────────────────────────┘
@@ -32,13 +34,16 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 │                                                             │
 │  server/app.js           (createApp factory)                │
 │  server/config.js        (env-var loader)                   │
-│  server/db.js            (libSQL client + schema)           │
+│  server/db.js            (libSQL client + schema +          │
+│                           legacy migration)                 │
 │  ├── server/auth/                                           │
-│  │   ├── service.js      (bcrypt + JWT helpers)             │
-│  │   └── validators.js   (username/password rules)          │
+│  │   ├── service.js      (bcrypt + JWT helpers, requireAuth)│
+│  │   └── validators.js   (username/password/name rules)     │
+│  ├── server/roadmaps/                                       │
+│  │   └── builtin.js      (built-in roadmap identity)        │
 │  └── server/routes/                                         │
 │      ├── auth.js         (/api/auth/*)                      │
-│      └── data.js         (/api/data GET + PUT)              │
+│      └── roadmaps.js     (/api/roadmaps/*)                  │
 │                                                             │
 │  Static serving:                                            │
 │  index.html · css/ · js/ · data/roadmap.js  (allowlist)    │
@@ -46,8 +51,12 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
                    │ @libsql/client (async, over the network)
 ┌──────────────────▼──────────────────────────────────────────┐
 │     Turso (hosted libSQL) — TURSO_DATABASE_URL              │
-│  users        (id, username, password_hash, created_at)     │
-│  user_data    (user_id FK, data JSON, version, updated_at)  │
+│  users             (id, username, password_hash,            │
+│                     first_name, last_name, created_at)      │
+│  roadmaps          (id, user_id FK, name, description,      │
+│                     source, created_at)                     │
+│  roadmap_progress  (roadmap_id FK, data JSON, version,      │
+│                     updated_at)                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -67,9 +76,9 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 
 | File | Purpose |
 |------|---------|
-| `index.html` | SPA shell; loads all JS/CSS; hosts `<main id="main">` render target |
-| `js/app.js` | ~1961-line IIFE: all view rendering, state, sync, auth UI, event handling |
-| `js/api.js` | `AuthApi` (register/login/logout/me) and `DataApi` (getData/putData) using `fetch` |
+| `index.html` | SPA shell; loads all JS/CSS; hosts the auth screen, the roadmap dashboard (`#dashboardScreen`) and the `<main id="main">` view render target |
+| `js/app.js` | Large IIFE: roadmap dashboard, view rendering, state, sync, auth UI, event handling |
+| `js/api.js` | `AuthApi` (register/login/logout/me/checkUsername) and `RoadmapApi` (list/restoreBuiltin/remove/getProgress/putProgress) using `fetch` |
 | `js/progress-schema.js` | UMD validator shared with server; validates `ProgressStore` shape |
 | `data/roadmap.js` | Static content — `window.ROADMAP_DATA`; generated from `data/roadmap.md` |
 | `css/styles.css` | All application styles (light/dark theme support) |
@@ -81,11 +90,12 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 | `server/index.js` | Entry point — calls `createApp`, binds port, sets up graceful shutdown |
 | `server/app.js` | `createApp(db, sessionSecret, opts)` — pure factory, fully testable |
 | `server/config.js` | `loadConfig()` — reads env vars, validates required keys, returns config object |
-| `server/db.js` | `openDb(url, authToken)` (async) — creates the libSQL client and applies the schema via `batch` |
-| `server/auth/service.js` | `hashPassword`, `verifyPassword`, `signToken`, `verifyToken`, cookie options |
-| `server/auth/validators.js` | `validateUsername`, `validatePassword` — returns error strings or null |
-| `server/routes/auth.js` | Handles `/api/auth/register`, `/login`, `/logout`, `/me` |
-| `server/routes/data.js` | Handles `GET /api/data`, `PUT /api/data` with optimistic concurrency |
+| `server/db.js` | `openDb(url, authToken)` (async) — creates the libSQL client, applies the schema via `batch`, adds missing columns, and runs the one-time `user_data` → `roadmaps` migration |
+| `server/auth/service.js` | `hashPassword`, `verifyPassword`, `signToken`, `verifyToken`, cookie options, `getCurrentUser`, `createRequireAuth` |
+| `server/auth/validators.js` | `validateUsername`, `validatePassword`, `validateName` — return `{ valid, error }` |
+| `server/roadmaps/builtin.js` | `BUILTIN_AI_ENGINEER` — name, description and `source` of the roadmap every account starts with |
+| `server/routes/auth.js` | Handles `/api/auth/register` (user + starter roadmap in one transaction), `/login`, `/logout`, `/me`, `/check-username` |
+| `server/routes/roadmaps.js` | Handles `/api/roadmaps`: list, restore built-in, delete, and `GET`/`PUT /:id/progress` with optimistic concurrency; all queries scoped to the session user |
 
 ### 3.3 Supporting Tools
 
@@ -106,6 +116,7 @@ User submits register/login form
         ▼
 POST /api/auth/register or /login
   bcrypt hash/verify password (anti-timing dummy hash for unknown users)
+  (register also inserts the starter roadmap in the same transaction)
   jwt.sign({ sub: userId, un: username }, SESSION_SECRET, { expiresIn: '7d' })
         │
         ▼
@@ -120,7 +131,7 @@ Every subsequent fetch() call with credentials: 'same-origin'
   → Cookie: rd_session=<JWT> sent automatically
         │
         ▼
-requireAuth middleware (server/routes/data.js)
+requireAuth middleware (server/auth/service.js, applied to /api/roadmaps)
   jwt.verify(req.cookies.rd_session) → { id, username }
   db lookup confirms user exists
   sets req.user = { id, username }
@@ -133,7 +144,34 @@ Route handler processes request
 
 ---
 
-## 5. Data Flow — Saving Progress
+## 5. Navigation Flow — Dashboard to Roadmap
+
+```
+boot()                                 GET /api/auth/me
+  │ 401 → auth screen (login / register)
+  ▼ 200 (or after a successful login/register)
+enterDashboard(user)                   resets per-roadmap sync state; session.roadmapId = null
+  ▼
+showDashboard() → renderDashboard()    GET /api/roadmaps
+  │  cards: Open · Delete
+  │  action cards: Restore AI Engineer Roadmap (only if the user has none),
+  │                Create new roadmap / Create with AI (disabled, "Coming soon")
+  │
+  ├─ Delete → confirmation modal → DELETE /api/roadmaps/:id → refresh list
+  ├─ Restore → POST /api/roadmaps { source } → refresh list
+  └─ Open → openRoadmap(id)            GET /api/roadmaps/:id/progress
+        sets session.roadmapId, session.version; loads progress; rebuilds INDEX;
+        header title/subtitle come from the roadmap; starts on the Overview tab
+        │
+        ▼ "←" back button
+backToDashboard()                      flushes unsaved changes first (confirms if they can't be saved)
+```
+
+Logging out follows the same "flush first" rule and then reloads the page, dropping all in-memory user state.
+
+---
+
+## 6. Data Flow — Saving Progress
 
 ```
 User interacts with UI (e.g. marks subtask as completed)
@@ -145,8 +183,8 @@ app.js: update in-memory progress object
 persist() → schedules debounced autosave (1500ms)
         │
         ▼ (after debounce)
-DataApi.putData(progress, session.version)
-  PUT /api/data { data: ProgressStore, version: N }
+RoadmapApi.putProgress(session.roadmapId, progress, session.version)
+  PUT /api/roadmaps/:id/progress { data: ProgressStore, version: N }
         │
   ┌─────┴──────────┐
   │                │
@@ -154,8 +192,8 @@ Match            Mismatch
 (version OK)     (409 conflict)
   │                │
   ▼                ▼
-UPDATE user_data   Return { error, server: { data, version } }
-SET version = N+1  Conflict modal → user chooses server or local
+UPDATE roadmap_progress   Return { error, server: { data, version } }
+SET version = N+1         Conflict modal → user chooses server or local
   │
   ▼
 200 { version: N+1, updatedAt }
@@ -164,9 +202,9 @@ session.version = N+1
 
 ---
 
-## 6. Static Content Flow — Roadmap Data
+## 7. Static Content Flow — Roadmap Data
 
-The roadmap curriculum itself is **static** — it is not stored in the database and cannot be edited through the UI:
+The built-in AI Engineer curriculum is **static** — it is not stored in the database and cannot be edited through the UI (the `roadmaps` row for it holds only metadata; users can still add custom topics/months, stored in their progress):
 
 ```
 data/roadmap.md          (human-edited Markdown source)
@@ -182,11 +220,17 @@ The browser loads `data/roadmap.js` as a `<script>` tag. `app.js` reads `window.
 
 ---
 
-## 7. Key Design Decisions
+## 8. Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
 | No frontend framework | Zero build complexity; pure HTML+JS loads instantly, no toolchain required for contributors |
+| One progress row per roadmap (`roadmap_progress`) | Each roadmap saves, versions and conflicts independently; deleting a roadmap cascades to exactly its own progress |
+| Built-in roadmap stored as metadata only (`source = 'builtin_ai_engineer'`) | The curriculum stays a single static bundle shared by all users; the database holds only name, description and per-user progress. A `source` column (no CHECK constraint) leaves room for future roadmap kinds |
+| Starter roadmap seeded in the registration transaction | An account never exists without a roadmap; a failed registration leaves no orphan rows |
+| Legacy `user_data` migrated once, renamed not dropped | Preserves every user's progress and version; the old table stays as a safety net (`user_data_legacy`) and its absence makes later boots skip the migration, so a deleted roadmap is never re-seeded |
+| Ownership enforced in every roadmap query (`WHERE id = ? AND user_id = ?`) | Another user's roadmap is indistinguishable from a missing one (404); the user id never comes from the request |
+| Dashboard as the post-login landing screen | A fixed entry point that scales from one roadmap to many without changing the roadmap views themselves |
 | JWT in httpOnly cookies | Immune to XSS-based token theft; rolling sessions keep UX seamless |
 | JSON blob for progress data | Schema flexibility; user additions (custom phases/topics) fit naturally; avoids N+1 DB rows |
 | Optimistic concurrency (compare-and-swap) | Safe multi-tab editing without locking; conflict surfaced transparently to user |

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AI Engineer Roadmap — Progress Dashboard</title>
+<title>Roadmap Tracker</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧭</text></svg>" />
 <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -13,7 +13,7 @@
 
 <div id="authScreen" class="auth-screen hidden">
   <form id="authForm" class="auth-card" novalidate>
-    <div class="auth-brand"><span aria-hidden="true">🧭</span> AI Engineer Roadmap</div>
+    <div class="auth-brand"><span aria-hidden="true">🧭</span> Roadmap Tracker</div>
     <h2 id="authTitle">Log in</h2>
     <p id="authNotice" class="auth-notice hidden"></p>
 
@@ -53,7 +53,7 @@
     <button type="button" id="authDownload" class="link-btn hidden">⬇ Download my unsaved changes (JSON)</button>
   </form>
   <div id="authBlock" class="auth-card hidden">
-    <div class="auth-brand"><span aria-hidden="true">🧭</span> AI Engineer Roadmap</div>
+    <div class="auth-brand"><span aria-hidden="true">🧭</span> Roadmap Tracker</div>
     <h2 id="authBlockTitle"></h2>
     <p id="authBlockText" class="auth-notice"></p>
     <div id="authBlockActions" class="modal-actions"></div>
@@ -61,7 +61,7 @@
 
   <footer class="auth-footer">
     <div class="auth-footer-inner">
-      <span class="auth-footer-copy">&copy; <span id="authFooterYear"></span> AI Engineer Roadmap. All rights reserved.</span>
+      <span class="auth-footer-copy">&copy; <span id="authFooterYear"></span> Roadmap Tracker. All rights reserved.</span>
       <span class="auth-footer-sep">·</span>
       <span>Developed by
         <a class="auth-footer-link" href="mailto:upendra.kumar48762@gmail.com">upendra.kumar48762@gmail.com</a>
@@ -78,13 +78,30 @@
   </footer>
 </div>
 
+<div id="dashboardScreen" class="dashboard-screen hidden">
+  <div class="dashboard-bar">
+    <div class="dashboard-bar-inner">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">🧭</span>
+        <div>
+          <h1>Roadmap Tracker</h1>
+          <p class="subtitle" id="dashboardGreeting"></p>
+        </div>
+      </div>
+      <button type="button" class="btn" id="dashboardLogoutBtn">Log out</button>
+    </div>
+  </div>
+  <div class="dashboard-content" id="dashboardContent" aria-live="polite"></div>
+</div>
+
 <header class="app-header">
   <div class="header-inner">
     <div class="brand">
+      <button type="button" class="back-btn" id="backToDashboardBtn" aria-label="Back to all roadmaps" title="All roadmaps">←</button>
       <span class="brand-icon" aria-hidden="true">🧭</span>
       <div>
-        <h1>AI Engineer Roadmap</h1>
-        <p class="subtitle">Tier-1 Production AI Engineer — 10-Month Execution Tracker</p>
+        <h1 id="roadmapTitle">Roadmap</h1>
+        <p class="subtitle" id="roadmapSubtitle"></p>
       </div>
     </div>
     <div class="profile-anchor" id="profileAnchor">

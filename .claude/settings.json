@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
+    ],
+    "ask": [
+      "Bash(* --force*)",
+      "Bash(rm -rf*)",
+      "Bash(rm -r *)",
+      "Bash(rmdir *)",
+      "Bash(del /f*)",
+      "Bash(del /s*)",
+      "Bash(rd /s*)",
+      "Bash(DROP *)",
+      "Bash(DROP TABLE*)",
+      "Bash(DELETE FROM*)",
+      "Bash(TRUNCATE*)",
+      "Bash(npx prisma migrate reset*)",
+      "Bash(npx prisma db push --force-reset*)",
+      "Bash(turso db destroy*)",
+      "Bash(turso db shell * .quit*)"
+    ],
+    "blockReadsOutsideWorkingDirectories": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "$input = $null; try { $input = $args[0] } catch {}; $json = [Console]::In.ReadToEnd(); $cmd = ($json | ConvertFrom-Json).tool_input.command; $blocked = @('git add', 'git commit', 'git push'); foreach ($b in $blocked) { if ($cmd -match ('^' + [regex]::Escape($b))) { @{ continue = $false; stopReason = \"Blocked: '$b' is not allowed. Please run git commands manually.\" } | ConvertTo-Json; exit 0 } }; exit 0",
+            "statusMessage": "Checking git guardrails..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "$json = [Console]::In.ReadToEnd(); $data = $json | ConvertFrom-Json; $fp = if ($data.tool_input.file_path) { $data.tool_input.file_path } elseif ($data.tool_input.path) { $data.tool_input.path } else { '' }; if ($fp -eq '') { exit 0 }; $cwd = (Get-Location).Path.Replace('\\', '/'); $fp_norm = $fp.Replace('\\', '/'); if (-not $fp_norm.StartsWith($cwd)) { @{ continue = $false; stopReason = \"Blocked: file '$fp' is outside the working directory '$cwd'.\" } | ConvertTo-Json; exit 0 }; exit 0",
+            "statusMessage": "Checking file path boundary..."
+          }
+        ]
+      }
+    ]
+  }
+}

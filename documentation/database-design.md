@@ -9,7 +9,7 @@ The application uses **[Turso](https://turso.tech)** (hosted libSQL, a SQLite-co
 - `file:<path>` — local SQLite file; the development default is `./data/app.db` when no URL is set
 - `:memory:` — in-process database used by the test suite
 
-**Startup:** `openDb(url, authToken)` (async) creates the client and applies the schema in one call, `client.batch(SCHEMA_STATEMENTS, "write")`. No `PRAGMA journal_mode` is set by the application (journaling is managed by libSQL/Turso). Foreign-key constraints are enforced by libSQL by default; the test suite verifies this through the `ON DELETE CASCADE` test.
+**Startup:** `openDb(url, authToken)` (async) creates the client, applies the schema with `client.batch(SCHEMA_STATEMENTS, "write")`, runs the idempotent column additions (`first_name`/`last_name`), then runs the one-time legacy migration (see [section 9](#9-migration-from-the-single-roadmap-schema)). No `PRAGMA journal_mode` is set by the application (journaling is managed by libSQL/Turso). Foreign-key constraints are enforced by libSQL by default; the test suite verifies this through the `ON DELETE CASCADE` tests.
 
 Schema is created with `CREATE TABLE IF NOT EXISTS` guards, so startup is idempotent. All timestamps are stored as ISO-8601 text (`YYYY-MM-DDTHH:MM:SS.sssZ`).
 
@@ -24,22 +24,37 @@ Schema is created with `CREATE TABLE IF NOT EXISTS` guards, so startup is idempo
 │ id (PK)                       │
 │ username (UNIQUE, NOCASE)     │
 │ password_hash                 │
+│ first_name, last_name         │
 │ created_at                    │
 └──────────────┬────────────────┘
                │ 1
                │ ON DELETE CASCADE
-               │ N (max 1 in practice)
+               │ N (starts with 1: the AI Engineer roadmap)
 ┌──────────────▼────────────────┐
-│           user_data           │
+│           roadmaps            │
 ├───────────────────────────────┤
-│ user_id (PK, FK → users.id)  │
+│ id (PK)                       │
+│ user_id (FK → users.id)       │
+│ name, description             │
+│ source                        │
+│ created_at                    │
+└──────────────┬────────────────┘
+               │ 1
+               │ ON DELETE CASCADE
+               │ 0..1 (created on first save)
+┌──────────────▼────────────────┐
+│       roadmap_progress        │
+├───────────────────────────────┤
+│ roadmap_id (PK, FK → id)      │
 │ data  (JSON text)             │
 │ version (integer)             │
 │ updated_at                    │
 └───────────────────────────────┘
 ```
 
-The relationship is effectively **1 : 0..1**: each user has at most one `user_data` row, created on first save. Deleting a user cascades to delete their data row.
+A user owns **N roadmaps** (`users` 1 : N `roadmaps`); a new account is created with exactly one, the built-in AI Engineer roadmap. Each roadmap has **at most one** `roadmap_progress` row, created on its first save (`roadmaps` 1 : 0..1 `roadmap_progress`). Deleting a roadmap cascades to its progress row; deleting a user cascades through both levels.
+
+`roadmaps.source` identifies where a roadmap's *content* comes from. `builtin_ai_engineer` rows are metadata only — the curriculum is the static `data/roadmap.js` bundle, so nothing but name, description and the user's progress is stored per account.
 
 ---
 
@@ -52,6 +67,8 @@ CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT    NOT NULL,
+  first_name    TEXT    NOT NULL DEFAULT '',
+  last_name     TEXT    NOT NULL DEFAULT '',
   created_at    TEXT    NOT NULL
                 DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -62,16 +79,45 @@ CREATE TABLE IF NOT EXISTS users (
 | `id` | INTEGER | PK, AUTOINCREMENT | Surrogate key; embedded in JWT `sub` claim |
 | `username` | TEXT | UNIQUE NOCASE, NOT NULL | Case-insensitive uniqueness — `Alice` and `alice` collide |
 | `password_hash` | TEXT | NOT NULL | bcrypt `$2b$12$...` hash; never returned in API responses |
+| `first_name`, `last_name` | TEXT | NOT NULL, DEFAULT `''` | Collected at registration; added to older databases by `ALTER TABLE` at startup (duplicate-column errors ignored) |
 | `created_at` | TEXT | NOT NULL, DEFAULT | ISO-8601 UTC timestamp; set once at row creation |
 
 ---
 
-### 3.2 `user_data`
+### 3.2 `roadmaps`
 
 ```sql
-CREATE TABLE IF NOT EXISTS user_data (
-  user_id    INTEGER PRIMARY KEY
-             REFERENCES users(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS roadmaps (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT    NOT NULL,
+  description TEXT    NOT NULL DEFAULT '',
+  source      TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL
+              DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_roadmaps_user ON roadmaps(user_id);
+```
+
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| `id` | INTEGER | PK, AUTOINCREMENT | Used in `/api/roadmaps/:id` URLs; every lookup also filters on `user_id` |
+| `user_id` | INTEGER | NOT NULL, FK → `users.id`, CASCADE | Owner |
+| `name` | TEXT | NOT NULL | Display name, e.g. `AI Engineer Roadmap` |
+| `description` | TEXT | NOT NULL, DEFAULT `''` | Shown as the subtitle inside the roadmap |
+| `source` | TEXT | NOT NULL | `builtin_ai_engineer` today; no CHECK constraint, so future sources need no migration |
+| `created_at` | TEXT | NOT NULL, DEFAULT | ISO-8601 UTC timestamp |
+
+The built-in name, description and source live in `server/roadmaps/builtin.js` (`BUILTIN_AI_ENGINEER`) and are shared by registration, the legacy migration and the restore endpoint.
+
+---
+
+### 3.3 `roadmap_progress`
+
+```sql
+CREATE TABLE IF NOT EXISTS roadmap_progress (
+  roadmap_id INTEGER PRIMARY KEY
+             REFERENCES roadmaps(id) ON DELETE CASCADE,
   data       TEXT    NOT NULL,
   version    INTEGER NOT NULL,
   updated_at TEXT    NOT NULL
@@ -80,14 +126,14 @@ CREATE TABLE IF NOT EXISTS user_data (
 
 | Column | Type | Constraints | Notes |
 |--------|------|-------------|-------|
-| `user_id` | INTEGER | PK, FK → `users.id`, CASCADE | One row per user; PK doubles as FK |
+| `roadmap_id` | INTEGER | PK, FK → `roadmaps.id`, CASCADE | One row per roadmap; PK doubles as FK |
 | `data` | TEXT | NOT NULL | Serialised `ProgressStore` JSON; validated before write |
 | `version` | INTEGER | NOT NULL | Monotonically incremented; starts at 1 on first save |
-| `updated_at` | TEXT | NOT NULL | ISO-8601 UTC timestamp; set on every write |
+| `updated_at` | TEXT | NOT NULL | ISO-8601 UTC timestamp; set on every write; surfaced as `lastActivityAt` in the roadmap list |
 
 ---
 
-## 4. Data Model — ProgressStore (stored in `user_data.data`)
+## 4. Data Model — ProgressStore (stored in `roadmap_progress.data`)
 
 The `data` column stores the user's entire progress state as a single JSON text value. Its shape is defined and validated by `js/progress-schema.js` (UMD module shared between browser and server).
 
@@ -149,9 +195,11 @@ SQLite automatically indexes `PRIMARY KEY` and `UNIQUE` columns. The schema crea
 |-------|-------|--------|------|
 | (implicit) | `users` | `id` | PK |
 | (implicit) | `users` | `username` | UNIQUE |
-| (implicit) | `user_data` | `user_id` | PK |
+| `idx_roadmaps_user` | `roadmaps` | `user_id` | Explicit — serves the roadmap list and every ownership check |
+| (implicit) | `roadmaps` | `id` | PK |
+| (implicit) | `roadmap_progress` | `roadmap_id` | PK |
 
-No additional indexes are needed at current scale (single-user app; all queries are PK/UNIQUE lookups).
+No further indexes are needed at current scale; all other queries are PK/UNIQUE lookups.
 
 ---
 
@@ -163,28 +211,61 @@ SELECT * FROM users WHERE username = ? COLLATE NOCASE;
 ```
 The `COLLATE NOCASE` on the column definition makes this implicitly case-insensitive.
 
-### Save user data (first save vs. update)
-The `PUT /api/data` route performs an atomic compare-and-swap using a **single statement** (no explicit transaction), so it costs one network round trip to Turso. The statement depends on the client's version:
+### Registration — user and starter roadmap in one transaction
+`POST /api/auth/register` sends both statements in one `db.batch([...], "write")`, so an account never exists without its starter roadmap, and a rejected duplicate username rolls back both:
+
+```sql
+INSERT INTO users (username, password_hash, first_name, last_name) VALUES (?, ?, ?, ?);
+INSERT INTO roadmaps (user_id, name, description, source)
+VALUES (last_insert_rowid(), ?, ?, ?);   -- the user id from the statement above
+```
+
+### List a user's roadmaps
+```sql
+SELECT r.id, r.name, r.description, r.source, r.created_at,
+       p.updated_at AS last_activity_at
+FROM roadmaps r LEFT JOIN roadmap_progress p ON p.roadmap_id = r.id
+WHERE r.user_id = ?
+ORDER BY r.created_at, r.id;
+```
+`last_activity_at` is `NULL` for a roadmap that has never been saved.
+
+### Ownership check (every `/:id` route)
+```sql
+SELECT id, name, description, source, created_at
+FROM roadmaps WHERE id = ? AND user_id = ?;
+```
+No row means 404 — whether the id is unknown or belongs to someone else.
+
+### Restore the built-in roadmap / delete a roadmap
+```sql
+SELECT 1 FROM roadmaps WHERE user_id = ? AND source = ?;               -- already have it? -> 409
+INSERT INTO roadmaps (user_id, name, description, source) VALUES (?, ?, ?, ?);
+DELETE FROM roadmaps WHERE id = ? AND user_id = ?;                     -- rowsAffected 0 -> 404; progress cascades
+```
+
+### Save roadmap progress (first save vs. update)
+The `PUT /api/roadmaps/:id/progress` route performs an atomic compare-and-swap using a **single statement** (no explicit transaction), after the ownership check above. The statement depends on the client's version:
 
 ```sql
 -- clientVersion = 0: first save (no row yet)
-INSERT INTO user_data (user_id, data, version, updated_at)
+INSERT INTO roadmap_progress (roadmap_id, data, version, updated_at)
 VALUES (?, ?, 1, ?)
-ON CONFLICT(user_id) DO NOTHING;
+ON CONFLICT(roadmap_id) DO NOTHING;
 
 -- clientVersion > 0: update only if the stored version still matches
-UPDATE user_data
+UPDATE roadmap_progress
    SET data = ?, version = version + 1, updated_at = ?
- WHERE user_id = ? AND version = ?;      -- the CAS guard
+ WHERE roadmap_id = ? AND version = ?;      -- the CAS guard
 ```
 
 If `rowsAffected === 1` the save succeeded and the new version is `clientVersion + 1`. Otherwise the version didn't match (or a row already exists for a version-0 insert), so the route re-reads the row and returns **409 Conflict** with the server's current copy.
 
-### Fetch user progress
+### Fetch roadmap progress
 ```sql
-SELECT data, version, updated_at FROM user_data WHERE user_id = ?;
+SELECT data, version, updated_at FROM roadmap_progress WHERE roadmap_id = ?;
 ```
-Returns `null` data for a new user (no row yet) — represented as `{ data: null, version: 0 }` in the API response.
+Returns `null` data for a roadmap that has never been saved (no row yet) — represented as `{ data: null, version: 0 }` in the API response.
 
 ---
 
@@ -192,7 +273,8 @@ Returns `null` data for a new user (no row yet) — represented as `{ data: null
 
 - `password_hash` is stored as a bcrypt `$2b$12$...` string (cost factor 12 default). The plain-text password never touches the database.
 - The `data` column is validated by `validateProgress()` before every write. Malformed JSON or invalid schema causes a **400** and is never written.
-- `ON DELETE CASCADE` ensures no orphaned `user_data` rows if a user is ever removed.
+- `ON DELETE CASCADE` ensures no orphaned `roadmaps` or `roadmap_progress` rows if a user or roadmap is removed.
+- Roadmap access is always scoped by the session user (`WHERE id = ? AND user_id = ?`); the user id is never taken from the request.
 - The local development file (`data/app.db`) is **not served** by the static file allowlist and returns 404 if requested directly.
 - `TURSO_AUTH_TOKEN` grants full access to the database. Keep it in `.env` (git-ignored) or the host's secret store; never commit it.
 - All queries use parameterised `args`, never string concatenation. Duplicate usernames are detected via `isUniqueViolation` (error code `SQLITE_CONSTRAINT_UNIQUE` or a message containing `UNIQUE constraint failed`) and mapped to 409.
@@ -205,3 +287,23 @@ Returns `null` data for a new user (no row yet) — represented as `{ data: null
 |---------|---------|-------------|
 | `TURSO_DATABASE_URL` | dev: local file `./data/app.db`; **required in production** | `libsql://…` Turso URL (or `file:` / `:memory:`); tests use `:memory:` |
 | `TURSO_AUTH_TOKEN` | empty | Turso auth token; required when the URL is remote (`libsql://`) in production |
+
+---
+
+## 9. Migration from the single-roadmap schema
+
+Before multi-roadmap support, each user had one row in a `user_data` table (`user_id` PK, `data`, `version`, `updated_at`). `migrateLegacyUserData` in `server/db.js` moves that data on the first boot of the new code:
+
+1. **Guard.** It runs only if a table named `user_data` exists in `sqlite_master`. A fresh database never has one, and the step below removes it, so later boots skip the migration entirely.
+2. **One transaction** (`client.batch([...], "write")`):
+   1. `INSERT INTO roadmaps … SELECT … FROM users u WHERE NOT EXISTS (SELECT 1 FROM roadmaps r WHERE r.user_id = u.id)` — gives **every** account, including ones that never saved, the built-in AI Engineer roadmap.
+   2. `INSERT INTO roadmap_progress … SELECT r.id, ud.data, ud.version, ud.updated_at FROM roadmaps r JOIN user_data ud ON ud.user_id = r.user_id WHERE r.source = ?` — copies each user's saved progress and **keeps its `version` and `updated_at`**, so open browser tabs and CAS saves keep working.
+   3. `ALTER TABLE user_data RENAME TO user_data_legacy`.
+3. **Rename, not drop.** The old data stays in `user_data_legacy` as a safety net. Nothing reads it; drop it manually (`DROP TABLE user_data_legacy`) once the new schema is confirmed healthy.
+
+Because the guard is "`user_data` exists", a user who later deletes their AI Engineer roadmap is **not** re-seeded on the next boot.
+
+**Rollout notes**
+- Deploy as a single switch. An older server instance still running against the same database would fail once `user_data` is renamed, so stop old instances before (or as) the new one boots.
+- The migration was verified against a copy of a real development database (account and progress version preserved) and by `test/roadmaps.test.js`.
+- To roll back, stop the new code, then `ALTER TABLE user_data_legacy RENAME TO user_data` (progress saved after the migration lives only in `roadmap_progress` and would be lost on the old code).

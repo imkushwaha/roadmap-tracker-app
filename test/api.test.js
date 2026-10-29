@@ -1,7 +1,7 @@
 const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const jwt = require("jsonwebtoken");
-const { startServer, client, creds, sampleData, SECRET } = require("./helpers");
+const { startServer, client, creds, sampleData, SECRET, dp } = require("./helpers");
 
 let srv;
 before(async () => { srv = await startServer(); });
@@ -14,7 +14,7 @@ describe("auth flow", () => {
 
     const reg = await c.post("/api/auth/register", creds("alice"));
     assert.equal(reg.status, 201);
-    assert.deepEqual(reg.body, { user: { username: "alice" } });
+    assert.deepEqual(reg.body, { user: { username: "alice", firstName: "Test", lastName: "User" } });
 
     const me = await c.get("/api/auth/me");
     assert.equal(me.status, 200);
@@ -23,7 +23,7 @@ describe("auth flow", () => {
     const out = await c.post("/api/auth/logout");
     assert.equal(out.status, 204);
     assert.equal((await c.get("/api/auth/me")).status, 401);
-    assert.equal((await c.get("/api/data")).status, 401);
+    assert.equal((await c.get("/api/roadmaps")).status, 401);
 
     const login = await c.post("/api/auth/login", creds("alice"));
     assert.equal(login.status, 200);
@@ -105,7 +105,7 @@ describe("auth flow", () => {
     assert.equal((await c.get("/api/auth/me")).status, 401);
     const none = jwt.sign({ un: "x" }, "", { subject: "1", algorithm: "none" });
     c.jar.set("rd_session", none);
-    assert.equal((await c.get("/api/data")).status, 401);
+    assert.equal((await c.get("/api/roadmaps")).status, 401);
   });
 });
 
@@ -114,25 +114,25 @@ describe("data save/load", () => {
     const c = client(srv.base);
     await c.post("/api/auth/register", creds("roundtrip"));
 
-    const empty = await c.get("/api/data");
+    const empty = await c.get(await dp(c));
     assert.equal(empty.status, 200);
     assert.equal(empty.body.data, null);
     assert.equal(empty.body.version, 0);
 
     const d1 = sampleData();
-    const p1 = await c.put("/api/data", { data: d1, version: 0 });
+    const p1 = await c.put(await dp(c), { data: d1, version: 0 });
     assert.equal(p1.status, 200);
     assert.equal(p1.body.version, 1);
 
-    const got = await c.get("/api/data");
+    const got = await c.get(await dp(c));
     assert.deepEqual(got.body.data, d1);
     assert.equal(got.body.version, 1);
     assert.ok(got.body.updatedAt);
 
     const d2 = sampleData({ counters: { "counter-dsa": 4 } });
-    const p2 = await c.put("/api/data", { data: d2, version: 1 });
+    const p2 = await c.put(await dp(c), { data: d2, version: 1 });
     assert.equal(p2.body.version, 2);
-    assert.deepEqual((await c.get("/api/data")).body.data, d2);
+    assert.deepEqual((await c.get(await dp(c))).body.data, d2);
   });
 
   test("custom months/sections/topics round-trip unchanged and stay per-user", async () => {
@@ -146,19 +146,19 @@ describe("data save/load", () => {
                  tasks: [{ id: "custom-task-x", title: "Read the book chapter" }] }],
     };
     const data = sampleData({ custom });
-    assert.equal((await a.put("/api/data", { data, version: 0 })).status, 200);
-    assert.deepEqual((await a.get("/api/data")).body.data.custom, custom);
-    assert.equal((await b.get("/api/data")).body.data, null);
+    assert.equal((await a.put(await dp(a), { data, version: 0 })).status, 200);
+    assert.deepEqual((await a.get(await dp(a))).body.data.custom, custom);
+    assert.equal((await b.get(await dp(b))).body.data, null);
     const bad = sampleData({ custom: { topics: [], phases: [{ id: "m", title: "x", sections: [{ id: "s", title: "t", weekNumber: 9 }] }] } });
-    assert.equal((await a.put("/api/data", { data: bad, version: 1 })).status, 400);
-    assert.deepEqual((await a.get("/api/data")).body.data.custom, custom); // rejected save changed nothing
+    assert.equal((await a.put(await dp(a), { data: bad, version: 1 })).status, 400);
+    assert.deepEqual((await a.get(await dp(a))).body.data.custom, custom); // rejected save changed nothing
   });
 
   test("an export file (with exportedAt/version extras) is accepted as-is", async () => {
     const c = client(srv.base);
     await c.post("/api/auth/register", creds("exportfile"));
     const exported = { exportedAt: "2026-10-14T00:00:00.000Z", version: 1, ...sampleData() };
-    assert.equal((await c.put("/api/data", { data: exported, version: 0 })).status, 200);
+    assert.equal((await c.put(await dp(c), { data: exported, version: 0 })).status, 200);
   });
 
   test("rejects data that doesn't match the import schema", async () => {
@@ -173,25 +173,25 @@ describe("data save/load", () => {
       { items: {}, custom: { topics: [{ id: "t", sectionId: "s", title: "x" }] } },
     ];
     for (const data of cases) {
-      const r = await c.put("/api/data", { data, version: 0 });
+      const r = await c.put(await dp(c), { data, version: 0 });
       assert.equal(r.status, 400, JSON.stringify(data));
     }
-    assert.equal((await c.put("/api/data", { data: sampleData(), version: "0" })).status, 400);
-    assert.equal((await c.put("/api/data", { data: sampleData(), version: -1 })).status, 400);
-    assert.equal((await c.get("/api/data")).body.data, null); // nothing was saved
+    assert.equal((await c.put(await dp(c), { data: sampleData(), version: "0" })).status, 400);
+    assert.equal((await c.put(await dp(c), { data: sampleData(), version: -1 })).status, 400);
+    assert.equal((await c.get(await dp(c))).body.data, null); // nothing was saved
   });
 
   test("unauthenticated access to data is refused", async () => {
     const c = client(srv.base);
-    assert.equal((await c.get("/api/data")).status, 401);
-    assert.equal((await c.put("/api/data", { data: sampleData(), version: 0 })).status, 401);
+    assert.equal((await c.get("/api/roadmaps")).status, 401);
+    assert.equal((await c.put("/api/roadmaps/1/progress", { data: sampleData(), version: 0 })).status, 401);
   });
 
   test("request bodies over 5 MB are rejected with 413", async () => {
     const c = client(srv.base);
     await c.post("/api/auth/register", creds("bigbody"));
     const big = sampleData({ items: { "x": { status: "not_started", notes: "a".repeat(5.5 * 1024 * 1024) } } });
-    assert.equal((await c.put("/api/data", { data: big, version: 0 })).status, 413);
+    assert.equal((await c.put(await dp(c), { data: big, version: 0 })).status, 413);
   });
 
   test("malformed JSON gets a clean 400", async () => {
@@ -208,32 +208,32 @@ describe("version conflicts", () => {
     await c2.post("/api/auth/login", creds("twodevices"));
 
     const base = sampleData();
-    assert.equal((await c1.put("/api/data", { data: base, version: 0 })).body.version, 1);
+    assert.equal((await c1.put(await dp(c1), { data: base, version: 0 })).body.version, 1);
 
     const fromLaptop = sampleData({ counters: { "counter-dsa": 10 } });
-    assert.equal((await c1.put("/api/data", { data: fromLaptop, version: 1 })).body.version, 2);
+    assert.equal((await c1.put(await dp(c1), { data: fromLaptop, version: 1 })).body.version, 2);
 
     // device 2 still thinks the version is 1
-    const stale = await c2.put("/api/data", { data: sampleData({ counters: { "counter-dsa": 99 } }), version: 1 });
+    const stale = await c2.put(await dp(c2), { data: sampleData({ counters: { "counter-dsa": 99 } }), version: 1 });
     assert.equal(stale.status, 409);
     assert.equal(stale.body.server.version, 2);
     assert.deepEqual(stale.body.server.data, fromLaptop);
 
     // server copy was not clobbered
-    assert.deepEqual((await c1.get("/api/data")).body.data, fromLaptop);
+    assert.deepEqual((await c1.get(await dp(c1))).body.data, fromLaptop);
 
     // user chooses "overwrite": retry using the server's version
     const mine = sampleData({ counters: { "counter-dsa": 99 } });
-    const over = await c2.put("/api/data", { data: mine, version: stale.body.server.version });
+    const over = await c2.put(await dp(c2), { data: mine, version: stale.body.server.version });
     assert.equal(over.status, 200);
     assert.equal(over.body.version, 3);
-    assert.deepEqual((await c1.get("/api/data")).body.data, mine);
+    assert.deepEqual((await c1.get(await dp(c1))).body.data, mine);
   });
 
   test("a brand-new account can't be saved with a non-zero version", async () => {
     const c = client(srv.base);
     await c.post("/api/auth/register", creds("freshconflict"));
-    const r = await c.put("/api/data", { data: sampleData(), version: 5 });
+    const r = await c.put(await dp(c), { data: sampleData(), version: 5 });
     assert.equal(r.status, 409);
     assert.deepEqual(r.body.server, { data: null, version: 0 });
   });
@@ -247,29 +247,31 @@ describe("cross-user isolation", () => {
 
     const aData = sampleData({ counters: { "counter-dsa": 111 } });
     const bData = sampleData({ counters: { "counter-dsa": 222 } });
-    assert.equal((await a.put("/api/data", { data: aData, version: 0 })).status, 200);
+    assert.equal((await a.put(await dp(a), { data: aData, version: 0 })).status, 200);
 
     // B starts with nothing, not A's data
-    const bFirst = await b.get("/api/data");
+    const bFirst = await b.get(await dp(b));
     assert.equal(bFirst.body.data, null);
 
     // B saving starts at version 0 for B's own row; A's row is untouched
-    assert.equal((await b.put("/api/data", { data: bData, version: 0 })).body.version, 1);
-    assert.deepEqual((await a.get("/api/data")).body.data, aData);
-    assert.deepEqual((await b.get("/api/data")).body.data, bData);
+    assert.equal((await b.put(await dp(b), { data: bData, version: 0 })).body.version, 1);
+    assert.deepEqual((await a.get(await dp(a))).body.data, aData);
+    assert.deepEqual((await b.get(await dp(b))).body.data, bData);
 
     // The user id can't be smuggled in via query string, body, or headers
     const aId = (await srv.db.execute("SELECT id FROM users WHERE username='iso_a'")).rows[0].id;
-    const sneaky = await b.request("PUT", `/api/data?user_id=${aId}&userId=${aId}`,
+    const sneaky = await b.request("PUT", `${await dp(b)}?user_id=${aId}&userId=${aId}`,
       { data: sampleData({ counters: { "counter-dsa": 666 } }), version: 1, user_id: aId, userId: aId },
       { "x-user-id": String(aId) });
     assert.equal(sneaky.status, 200);
-    assert.deepEqual((await a.get("/api/data")).body.data, aData);
-    assert.equal((await b.get("/api/data")).body.data.counters["counter-dsa"], 666);
+    assert.deepEqual((await a.get(await dp(a))).body.data, aData);
+    assert.equal((await b.get(await dp(b))).body.data.counters["counter-dsa"], 666);
 
     // Straight from the DB: exactly one row each, matching their own data
     const { rows } = await srv.db.execute(
-      "SELECT u.username, d.data FROM user_data d JOIN users u ON u.id = d.user_id WHERE u.username IN ('iso_a','iso_b') ORDER BY u.username");
+      `SELECT u.username, d.data FROM roadmap_progress d
+       JOIN roadmaps r ON r.id = d.roadmap_id JOIN users u ON u.id = r.user_id
+       WHERE u.username IN ('iso_a','iso_b') ORDER BY u.username`);
     assert.equal(rows.length, 2);
     assert.equal(JSON.parse(rows[0].data).counters["counter-dsa"], 111);
     assert.equal(JSON.parse(rows[1].data).counters["counter-dsa"], 666);
@@ -278,21 +280,23 @@ describe("cross-user isolation", () => {
   test("logging out one browser doesn't expose data to a new user in the same browser", async () => {
     const shared = client(srv.base);
     await shared.post("/api/auth/register", creds("shared_one"));
-    await shared.put("/api/data", { data: sampleData(), version: 0 });
+    await shared.put(await dp(shared), { data: sampleData(), version: 0 });
     await shared.post("/api/auth/logout");
-    assert.equal((await shared.get("/api/data")).status, 401);
+    assert.equal((await shared.get("/api/roadmaps")).status, 401);
     await shared.post("/api/auth/register", creds("shared_two"));
-    assert.equal((await shared.get("/api/data")).body.data, null);
+    assert.equal((await shared.get(await dp(shared))).body.data, null);
   });
 
   test("deleting a user removes their data (FK cascade enabled)", async () => {
     const c = client(srv.base);
     await c.post("/api/auth/register", creds("cascade"));
-    await c.put("/api/data", { data: sampleData(), version: 0 });
+    await c.put(await dp(c), { data: sampleData(), version: 0 });
     const id = (await srv.db.execute("SELECT id FROM users WHERE username='cascade'")).rows[0].id;
     await srv.db.execute({ sql: "DELETE FROM users WHERE id = ?", args: [id] });
-    const left = await srv.db.execute({ sql: "SELECT COUNT(*) n FROM user_data WHERE user_id = ?", args: [id] });
-    assert.equal(left.rows[0].n, 0);
+    const roadmaps = await srv.db.execute({ sql: "SELECT COUNT(*) n FROM roadmaps WHERE user_id = ?", args: [id] });
+    assert.equal(roadmaps.rows[0].n, 0);
+    const progress = await srv.db.execute("SELECT COUNT(*) n FROM roadmap_progress WHERE roadmap_id NOT IN (SELECT id FROM roadmaps)");
+    assert.equal(progress.rows[0].n, 0);
     assert.equal((await c.get("/api/auth/me")).status, 401); // token for a deleted user is dead
   });
 });

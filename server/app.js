@@ -1,6 +1,6 @@
 /**
  * @module app
- * Express application factory. Composes middleware, auth and data routers,
+ * Express application factory. Composes middleware, auth and roadmap routers,
  * static file serving, and error handling into a configured Express instance.
  *
  * Every concern lives in its own module; this file is intentionally thin.
@@ -13,7 +13,7 @@ const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const { PROJECT_ROOT } = require("./config");
 const { createAuthRouter } = require("./routes/auth");
-const { createDataRouter } = require("./routes/data");
+const { createRoadmapsRouter } = require("./routes/roadmaps");
 const { COOKIE_NAME, createRequireAuth } = require("./auth/service");
 
 /**
@@ -62,7 +62,7 @@ function createApp({
     rateLimitConfig: authRateLimit,
   }));
 
-  app.use("/api/data", createDataRouter({ db, requireAuth }));
+  app.use("/api/roadmaps", createRoadmapsRouter({ db, requireAuth }));
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 

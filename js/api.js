@@ -2,8 +2,7 @@
  * @module api
  * Thin HTTP wrappers around the backend REST API.
  *
- * Exposes two focused namespaces — AuthApi and DataApi — plus a combined
- * window.Api shim for backwards compatibility with existing app code.
+ * Exposes two focused namespaces — AuthApi and RoadmapApi.
  * No application state lives here; callers are responsible for state management.
  */
 (function () {
@@ -12,7 +11,8 @@
   /**
    * @typedef {{ username: string }} UserInfo
    * @typedef {{ user: UserInfo }} AuthResponse
-   * @typedef {{ data: object|null, version: number, updatedAt?: string }} DataResponse
+   * @typedef {{ id: number, name: string, description: string, source: string, createdAt: string, lastActivityAt?: string|null }} RoadmapSummary
+   * @typedef {{ roadmap: RoadmapSummary, data: object|null, version: number, updatedAt?: string }} ProgressResponse
    * @typedef {{ version: number, updatedAt: string }} SaveResponse
    */
 
@@ -22,7 +22,7 @@
    * Network errors set `err.network = true` on the thrown Error.
    * HTTP error responses set `err.status` and `err.body`.
    *
-   * @param {'GET'|'POST'|'PUT'} method
+   * @param {'GET'|'POST'|'PUT'|'DELETE'} method
    * @param {string} path
    * @param {object} [body]
    * @returns {Promise<object|null>}
@@ -101,28 +101,49 @@
   };
 
   /**
-   * Data sync API — load and persist the user's progress data.
+   * Roadmap API — list, restore and delete roadmaps, and load/persist the
+   * progress stored against each one.
    * @namespace
    */
-  const DataApi = {
+  const RoadmapApi = {
     /**
-     * Fetch the user's current progress data and its server version.
-     * @returns {Promise<DataResponse>}
+     * List the signed-in user's roadmaps.
+     * @returns {Promise<{ roadmaps: RoadmapSummary[] }>}
      */
-    getData: () => call("GET", "/api/data"),
+    list: () => call("GET", "/api/roadmaps"),
+
+    /**
+     * Re-create the built-in AI Engineer roadmap after it was deleted.
+     * @returns {Promise<{ roadmap: RoadmapSummary }>}
+     */
+    restoreBuiltin: () => call("POST", "/api/roadmaps", { source: "builtin_ai_engineer" }),
+
+    /**
+     * Permanently delete a roadmap and its progress.
+     * @param {number} id
+     * @returns {Promise<null>}
+     */
+    remove: (id) => call("DELETE", `/api/roadmaps/${id}`),
+
+    /**
+     * Fetch a roadmap's metadata, progress data and server version.
+     * @param {number} id
+     * @returns {Promise<ProgressResponse>}
+     */
+    getProgress: (id) => call("GET", `/api/roadmaps/${id}/progress`),
 
     /**
      * Persist progress data. Requires the current server version for
      * optimistic concurrency; a 409 response carries the server's copy.
+     * @param {number} id
      * @param {object} data
      * @param {number} version
      * @returns {Promise<SaveResponse>}
      */
-    putData: (data, version) => call("PUT", "/api/data", { data, version }),
+    putProgress: (id, data, version) =>
+      call("PUT", `/api/roadmaps/${id}/progress`, { data, version }),
   };
 
-  // Publish to window — split namespaces for new code, combined shim for existing code
   window.AuthApi = AuthApi;
-  window.DataApi = DataApi;
-  window.Api = { ...AuthApi, ...DataApi };
+  window.RoadmapApi = RoadmapApi;
 })();
