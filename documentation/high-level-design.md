@@ -34,8 +34,7 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 │                                                             │
 │  server/app.js           (createApp factory)                │
 │  server/config.js        (env-var loader)                   │
-│  server/db.js            (libSQL client + schema +          │
-│                           legacy migration)                 │
+│  server/db.js            (libSQL client + schema)           │
 │  ├── server/auth/                                           │
 │  │   ├── service.js      (bcrypt + JWT helpers, requireAuth)│
 │  │   └── validators.js   (username/password/name rules)     │
@@ -93,7 +92,7 @@ The application is a **zero-build web app**: the frontend is plain HTML, CSS, an
 | `server/index.js` | Entry point — calls `createApp`, binds port, sets up graceful shutdown |
 | `server/app.js` | `createApp(db, sessionSecret, opts)` — pure factory, fully testable |
 | `server/config.js` | `loadConfig()` — reads env vars, validates required keys, returns config object |
-| `server/db.js` | `openDb(url, authToken)` (async) — creates the libSQL client, applies the schema via `batch`, adds missing columns, and runs the one-time `user_data` → `roadmaps` migration |
+| `server/db.js` | `openDb(url, authToken)` (async) — creates the libSQL client and applies the schema via `batch` |
 | `server/auth/service.js` | `hashPassword`, `verifyPassword`, `signToken`, `verifyToken`, cookie options, `getCurrentUser`, `createRequireAuth` |
 | `server/auth/validators.js` | `validateUsername`, `validatePassword`, `validateName` — return `{ valid, error }` |
 | `server/roadmaps/builtin.js` | `BUILTIN_AI_ENGINEER` — name, description and `source` of the roadmap every account starts with |
@@ -251,7 +250,6 @@ Consequences visible in the UI:
 | Custom roadmap = empty curriculum + `progress.custom`; no up-front builder, no `definition` column | The original plan (`.claude/specs/generic-tracker-plan.md`) called for a separate roadmap builder and a stored definition. That was **not built**: the app already lets users add and delete months, sections, topics and tasks and stores them in `progress.custom`, so a new custom roadmap simply starts empty and reuses that proven UI and storage. Editing after creation comes for free, there is no schema change, and no progress keys can be orphaned by a changed definition. A creation wizard that pre-fills `progress.custom`, roadmap templates, or a stored definition remain options for a later phase |
 | Roadmap SQL isolated in `server/roadmaps/repository.js` | The router is HTTP-only (parse, validate, respond), as the project rules require DB access in `db.js` or repository modules; ownership scoping and compare-and-swap live in one place |
 | Starter roadmap seeded in the registration transaction | An account never exists without a roadmap; a failed registration leaves no orphan rows |
-| Legacy `user_data` migrated once, renamed not dropped | Preserves every user's progress and version; the old table stays as a safety net (`user_data_legacy`) and its absence makes later boots skip the migration, so a deleted roadmap is never re-seeded |
 | Ownership enforced in every roadmap query (`WHERE id = ? AND user_id = ?`) | Another user's roadmap is indistinguishable from a missing one (404); the user id never comes from the request |
 | Dashboard as the post-login landing screen | A fixed entry point that scales from one roadmap to many without changing the roadmap views themselves |
 | JWT in httpOnly cookies | Immune to XSS-based token theft; rolling sessions keep UX seamless |

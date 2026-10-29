@@ -7,7 +7,6 @@
 "use strict";
 
 const { createClient } = require("@libsql/client");
-const { BUILTIN_AI_ENGINEER } = require("./roadmaps/builtin");
 
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -35,46 +34,6 @@ const SCHEMA_STATEMENTS = [
   )`,
 ];
 
-// Safe migrations for databases created before first_name/last_name were added.
-const MIGRATION_STATEMENTS = [
-  `ALTER TABLE users ADD COLUMN first_name TEXT NOT NULL DEFAULT ''`,
-  `ALTER TABLE users ADD COLUMN last_name  TEXT NOT NULL DEFAULT ''`,
-];
-
-/**
- * One-time move from the single-roadmap `user_data` table to per-roadmap
- * storage: every account gets the built-in roadmap row and its saved progress
- * is copied across. The old table is renamed (not dropped) so nothing is lost,
- * and its absence on later boots makes this a no-op. Runs as one transaction.
- *
- * @param {import('@libsql/client').Client} client
- * @returns {Promise<void>}
- */
-async function migrateLegacyUserData(client) {
-  const legacy = await client.execute(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_data'"
-  );
-  if (legacy.rows.length === 0) return;
-
-  const { source, name, description } = BUILTIN_AI_ENGINEER;
-  await client.batch([
-    {
-      sql: `INSERT INTO roadmaps (user_id, name, description, source)
-            SELECT u.id, ?, ?, ? FROM users u
-            WHERE NOT EXISTS (SELECT 1 FROM roadmaps r WHERE r.user_id = u.id)`,
-      args: [name, description, source],
-    },
-    {
-      sql: `INSERT INTO roadmap_progress (roadmap_id, data, version, updated_at)
-            SELECT r.id, ud.data, ud.version, ud.updated_at
-            FROM roadmaps r JOIN user_data ud ON ud.user_id = r.user_id
-            WHERE r.source = ?`,
-      args: [source],
-    },
-    "ALTER TABLE user_data RENAME TO user_data_legacy",
-  ], "write");
-}
-
 /**
  * Connect to the database at *url* and apply the schema.
  *
@@ -85,15 +44,6 @@ async function migrateLegacyUserData(client) {
 async function openDb(url, authToken) {
   const client = createClient({ url, authToken: authToken || undefined });
   await client.batch(SCHEMA_STATEMENTS, "write");
-  // Run column additions one-by-one; ignore "duplicate column" errors from existing DBs.
-  for (const sql of MIGRATION_STATEMENTS) {
-    try {
-      await client.execute(sql);
-    } catch (e) {
-      if (!/duplicate column|already exists/i.test(e?.message ?? "")) throw e;
-    }
-  }
-  await migrateLegacyUserData(client);
   return client;
 }
 

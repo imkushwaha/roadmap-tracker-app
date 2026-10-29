@@ -21,7 +21,7 @@ roadmap-dashboard/
 │   ├── index.js                   ← Boot + graceful shutdown
 │   ├── app.js                     ← createApp factory
 │   ├── config.js                  ← loadConfig (env vars)
-│   ├── db.js                      ← openDb + DDL + legacy user_data migration
+│   ├── db.js                      ← openDb + DDL
 │   ├── auth/
 │   │   ├── service.js             ← Pure auth helpers
 │   │   └── validators.js          ← Input validation
@@ -36,7 +36,7 @@ roadmap-dashboard/
 └── test/
     ├── helpers.js                 ← startServer, client, creds, dp, fixtures
     ├── api.test.js                ← Integration tests (auth, progress, conflicts, isolation)
-    ├── roadmaps.test.js           ← Roadmap list/create/delete/restore, ownership, limits, migration
+    ├── roadmaps.test.js           ← Roadmap list/create/delete/restore, ownership, limits
     ├── config.test.js             ← Config unit tests
     └── schema.test.js             ← Schema validator unit tests
 ```
@@ -105,13 +105,11 @@ In production (`NODE_ENV=production`), throws if `SESSION_SECRET` is missing or 
 async openDb(url, authToken) {
   client = createClient({ url, authToken: authToken || undefined })   // @libsql/client
   await client.batch(SCHEMA_STATEMENTS, 'write')   // CREATE TABLE/INDEX IF NOT EXISTS: users, roadmaps, idx_roadmaps_user, roadmap_progress
-  for (sql of MIGRATION_STATEMENTS) ...            // ALTER TABLE users ADD COLUMN first_name / last_name; "duplicate column" errors ignored
-  await migrateLegacyUserData(client)              // one-time user_data -> roadmaps/roadmap_progress
   return client
 }
 ```
 
-`migrateLegacyUserData(client)` returns immediately unless a table named `user_data` exists in `sqlite_master`. Otherwise it runs one `client.batch([...], 'write')` transaction that (1) inserts the built-in roadmap row for every user that has no roadmap, (2) copies each `user_data` row into `roadmap_progress` (keeping `data`, `version`, `updated_at`), and (3) runs `ALTER TABLE user_data RENAME TO user_data_legacy`. Since the old table is gone afterwards, later boots skip it. See `database-design.md` §9.
+There are no migrations: the schema is applied idempotently on every start. See `database-design.md` §9.
 
 All callers receive the same `@libsql/client` `Client`. Queries are async and parameterised: `await db.execute({ sql, args })` returns `{ rows, rowsAffected, lastInsertRowid }`; numeric columns arrive as JS numbers, `lastInsertRowid` as a `BigInt`. There are no prepared statements, and no `PRAGMA` calls — libSQL enforces foreign keys by default (covered by the `ON DELETE CASCADE` test). Each query is a network round trip to Turso (for `libsql://` URLs), so handlers avoid redundant queries; the data write is a single statement for that reason.
 
@@ -222,7 +220,7 @@ BUILTIN_AI_ENGINEER = Object.freeze({
 });
 ```
 
-Shared by registration (`routes/auth.js`), the legacy migration (`db.js`) and the restore endpoint (`routes/roadmaps.js`), so the three can never drift apart.
+Shared by registration (`routes/auth.js`) and the restore endpoint (`routes/roadmaps.js`), so the two can never drift apart.
 
 ---
 
@@ -571,10 +569,9 @@ sampleData(overrides?) → valid ProgressStore fixture
 | File | Scope |
 |------|-------|
 | `test/api.test.js` | Full HTTP integration: register, login, logout, me, progress save/load via `/api/roadmaps/:id/progress`, conflict, cross-user isolation, static serving, 404 for sensitive paths, rate limit |
-| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (another user's or malformed id → 404), atomic registration, the one-time `user_data` migration (copies progress and version, renames to `user_data_legacy`, never re-seeds a deleted roadmap), and the **custom roadmaps** block: create (trimmed name, listed after the starter, empty progress), start month seeded as version 1 and saveable, custom content staying separate per roadmap, input validation (blank/over-long/multi-line name, bad description or `startMonth`), markup in names stored verbatim, the 20-roadmap cap (and deleting frees a slot), cross-user isolation, and progress removed on delete |
+| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (another user's or malformed id → 404), atomic registration, and the **custom roadmaps** block: create (trimmed name, listed after the starter, empty progress), start month seeded as version 1 and saveable, custom content staying separate per roadmap, input validation (blank/over-long/multi-line name, bad description or `startMonth`), markup in names stored verbatim, the 20-roadmap cap (and deleting frees a slot), cross-user isolation, and progress removed on delete |
 
-The suite has 59 tests (`npm test`).
 | `test/config.test.js` | `loadConfig()` with various env var combinations; production secret validation |
 | `test/schema.test.js` | `validateProgress()`: valid stores, each invalid field type, nested violations, extra top-level keys |
 
-Run: `npm test` → `node --test "test/*.test.js"`
+Run: `npm test` → `node --test "test/*.test.js"` (58 tests)

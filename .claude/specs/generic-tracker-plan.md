@@ -4,6 +4,10 @@
 **Date:** 2026-10-29  
 **Status:** Phase 1 done · Phase 2 done (**built differently from this plan — see the note below**) · Phase 3 not started
 
+> **Update 2026-10-29:** the one-time `user_data` → `roadmaps` migration described in this plan was removed
+> from the code because the databases were reset (development phase, test users only). The text below is
+> kept as history.
+
 > **Phase 2 deviation (read this first).** Sections 4.4, 6.5, 6.6, 7 and 8 and the original Phase 2 list below
 > describe a separate up-front roadmap builder, a `roadmaps.definition` column, a
 > `RoadmapDefinition` schema validator and `js/roadmap-builder.js`. **None of that was built.** While

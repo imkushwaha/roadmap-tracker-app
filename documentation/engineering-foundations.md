@@ -163,7 +163,6 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 - **Foreign keys enforced** (libSQL default; verified by the cascade test) ensures `roadmaps.user_id` always references a real `users.id` and `roadmap_progress.roadmap_id` a real `roadmaps.id`.
 - **`ON DELETE CASCADE`** means deleting a roadmap removes its progress row, and deleting a user removes their roadmaps and progress, atomically.
 - **Atomic registration**: the user row and the starter roadmap are inserted in one `db.batch` transaction, so a failed or duplicate registration leaves no orphan rows.
-- **Safe schema migration**: the one-time `user_data` → `roadmaps` move runs in a single transaction, keeps each progress `version`, and renames (not drops) the old table to `user_data_legacy`.
 
 ---
 
@@ -180,7 +179,7 @@ Unit tests target the two pure, stateless modules: `loadConfig` and `validatePro
 ```
 test/helpers.js     — shared: startServer(), client (cookie-jar fetch), fixtures
 test/api.test.js    — HTTP integration (auth flow, progress save/load, conflict, isolation, security)
-test/roadmaps.test.js — roadmap list/create/restore/delete, custom-roadmap validation and limits, ownership, atomic registration, legacy migration
+test/roadmaps.test.js — roadmap list/create/restore/delete, custom-roadmap validation and limits, ownership, atomic registration
 test/config.test.js — loadConfig() unit tests
 test/schema.test.js — validateProgress() unit tests
 ```
@@ -194,7 +193,6 @@ test/schema.test.js — validateProgress() unit tests
 | Delete a roadmap, restore the built-in one | Cascade removes progress; restore starts fresh and is allowed once |
 | Create a custom roadmap (with and without a start month) | 201; trimmed name; start month seeded as progress version 1 and saveable; no progress row otherwise |
 | Invalid create input, markup in a name, the 20-roadmap cap | 400 / stored verbatim / 409, and deleting frees a slot |
-| Boot a database that has `user_data` | Progress and version copied once; old table renamed; deleted roadmaps not re-seeded |
 | Two-tab conflict (PUT twice with same version) | 409 returned with server's copy |
 | User A cannot read, write or delete User B's roadmap | Per-user isolation (404) |
 | GET `/data/app.db` returns 404 | File serving allowlist |

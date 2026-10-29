@@ -139,7 +139,7 @@ Open http://localhost:3000, choose **Create an account**, and start tracking. Ex
 npm test
 ```
 
-All 59 tests cover auth flows, roadmap list/create/delete/restore, custom-roadmap input validation and the 20-roadmap cap, per-roadmap progress save/load, conflict detection, cross-user isolation, the `user_data` migration, rate limiting, schema validation, and static-file security.
+All 58 tests cover auth flows, roadmap list/create/delete/restore, custom-roadmap input validation and the 20-roadmap cap, per-roadmap progress save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
 
 ### Regenerate Roadmap Data
 
@@ -170,7 +170,7 @@ roadmap-dashboard/
 │   ├── index.js                  Entry point: loads config, connects to DB, starts server
 │   ├── app.js                    Express app factory (thin compositor)
 │   ├── config.js                 Env-var loader with fast-fail production validation
-│   ├── db.js                     Turso/libSQL connect + schema + one-time user_data migration
+│   ├── db.js                     Turso/libSQL connect + schema (SCHEMA_STATEMENTS)
 │   ├── auth/
 │   │   ├── service.js            Pure auth helpers: bcrypt, JWT, cookie options
 │   │   └── validators.js         Input validators: username, password, name
@@ -189,7 +189,7 @@ roadmap-dashboard/
 ├── test/
 │   ├── helpers.js                Server bootstrap, cookie-jar client, fixtures
 │   ├── api.test.js               Integration tests: auth, progress, conflicts, isolation
-│   ├── roadmaps.test.js          Roadmap list/create/delete/restore, validation, cap, ownership, user_data migration
+│   ├── roadmaps.test.js          Roadmap list/create/delete/restore, validation, cap, ownership
 │   ├── config.test.js            Unit tests for config loader
 │   └── schema.test.js            Unit tests for progress-schema validator
 │
@@ -658,7 +658,7 @@ The test suite uses Node's built-in `node:test` runner — no Jest, no Mocha. Ea
 | Test file | Coverage |
 |---|---|
 | `test/api.test.js` | Auth flows, progress round-trips, version conflicts, cross-user isolation, rate limiting, static-file security |
-| `test/roadmaps.test.js` | Starter roadmap seeding, list/create/delete/restore, custom-roadmap validation, 20-roadmap cap, markup in names, ownership (404s), atomic registration, one-time `user_data` migration |
+| `test/roadmaps.test.js` | Starter roadmap seeding, list/create/delete/restore, custom-roadmap validation, 20-roadmap cap, markup in names, ownership (404s), atomic registration |
 | `test/config.test.js` | Config loader — env vars, production guards, defaults |
 | `test/schema.test.js` | Progress schema validator — valid/invalid shapes, `__proto__` injection, custom months |
 
@@ -711,8 +711,6 @@ turso db tokens create roadmap-dashboard       # → TURSO_AUTH_TOKEN (keep secr
 ```
 
 The schema (`users`, `roadmaps`, `roadmap_progress`) is created automatically on first start (`CREATE TABLE IF NOT EXISTS`).
-
-**Upgrading an existing database:** if a legacy `user_data` table is found on startup, a one-time migration (a single transaction) gives every account the AI Engineer roadmap, copies each user's saved progress into `roadmap_progress`, then **renames** `user_data` to `user_data_legacy` (nothing is dropped). On later boots there is no `user_data`, so the migration is a no-op and deleted roadmaps are never re-seeded. Deploy as a single switch: an older server instance still running would break once the table is renamed.
 
 ### Running anywhere
 

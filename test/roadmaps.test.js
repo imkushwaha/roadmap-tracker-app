@@ -1,10 +1,5 @@
 const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { createClient } = require("@libsql/client");
-const { openDb } = require("../server/db");
 const { startServer, client, creds, sampleData, dp } = require("./helpers");
 
 let srv;
@@ -232,59 +227,5 @@ describe("registration is atomic with the starter roadmap", () => {
     assert.equal(dup.status, 409);
     const after = (await srv.db.execute("SELECT COUNT(*) n FROM roadmaps")).rows[0].n;
     assert.equal(after, before);
-  });
-});
-
-describe("legacy user_data migration", () => {
-  const LEGACY_SCHEMA = [
-    `CREATE TABLE users (
-       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-       password_hash TEXT NOT NULL, first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '',
-       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
-    `CREATE TABLE user_data (
-       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-       data TEXT NOT NULL, version INTEGER NOT NULL, updated_at TEXT NOT NULL)`,
-  ];
-
-  test("copies saved progress into the built-in roadmap exactly once", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "roadmap-migrate-"));
-    const url = "file:" + path.join(dir, "legacy.db");
-    try {
-      const legacy = createClient({ url });
-      await legacy.batch(LEGACY_SCHEMA, "write");
-      await legacy.batch([
-        "INSERT INTO users (username, password_hash) VALUES ('saved', 'x'), ('never_saved', 'x')",
-        { sql: "INSERT INTO user_data (user_id, data, version, updated_at) VALUES (1, ?, 7, '2026-10-01T00:00:00.000Z')",
-          args: [JSON.stringify(sampleData())] },
-      ], "write");
-      legacy.close();
-
-      const db = await openDb(url);
-      const rows = (await db.execute(
-        `SELECT u.username, r.source, p.data, p.version, p.updated_at
-         FROM roadmaps r JOIN users u ON u.id = r.user_id
-         LEFT JOIN roadmap_progress p ON p.roadmap_id = r.id ORDER BY u.id`)).rows;
-      assert.equal(rows.length, 2);
-      assert.equal(rows[0].source, "builtin_ai_engineer");
-      assert.deepEqual(JSON.parse(rows[0].data), sampleData());
-      assert.equal(rows[0].version, 7);
-      assert.equal(rows[0].updated_at, "2026-10-01T00:00:00.000Z");
-      assert.equal(rows[1].data, null); // an account that never saved still gets its roadmap
-
-      const tables = (await db.execute("SELECT name FROM sqlite_master WHERE type='table'")).rows.map((r) => r.name);
-      assert.ok(tables.includes("user_data_legacy"));
-      assert.ok(!tables.includes("user_data"));
-
-      // A deleted roadmap must not be re-seeded on the next boot.
-      await db.execute("DELETE FROM roadmaps WHERE user_id = 1");
-      db.close();
-      const again = await openDb(url);
-      const count = (await again.execute("SELECT COUNT(*) n FROM roadmaps")).rows[0].n;
-      assert.equal(count, 1);
-      again.close();
-    } finally {
-      // Windows may still hold the SQLite file open; a leftover temp dir is harmless.
-      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* ignore */ }
-    }
   });
 });

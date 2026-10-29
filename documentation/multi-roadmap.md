@@ -1,6 +1,6 @@
 # Multi-Roadmap Tracker — Feature Guide
 
-The app started as a single "AI Engineer Roadmap" tracker. It is now a **roadmap tracker**: each account owns a list of roadmaps — the built-in AI Engineer one plus any number of its own (up to 20) — each with its own independent progress. This guide covers the user flow, how it is built, how custom roadmaps work, and how existing data was migrated. Endpoint and table details live in `api-design.md` and `database-design.md`.
+The app started as a single "AI Engineer Roadmap" tracker. It is now a **roadmap tracker**: each account owns a list of roadmaps — the built-in AI Engineer one plus any number of its own (up to 20) — each with its own independent progress. This guide covers the user flow, how it is built, and how custom roadmaps work. Endpoint and table details live in `api-design.md` and `database-design.md`.
 
 **Status:** Phase 1 (infrastructure + dashboard) and Phase 2 (custom roadmaps) are implemented. Phase 3 (polish, "Create with AI") is planned in `.claude/specs/generic-tracker-plan.md`.
 
@@ -87,10 +87,10 @@ The first plan (`.claude/specs/generic-tracker-plan.md`) proposed an up-front ro
 
 - the proven UI and storage, with nothing new to maintain;
 - editing after creation for free (a stored definition would have needed its own editing UI and a plan for progress keys orphaned by changes);
-- no schema change, so existing databases and the migration are unaffected;
+- no schema change was needed;
 - plan and progress saved, versioned and conflict-resolved together.
 
-Options left for a later phase if wanted: a creation wizard that pre-fills `progress.custom` with months/sections/topics, ready-made roadmap templates, or a stored definition (which would be a new column added by migration).
+Options left for a later phase if wanted: a creation wizard that pre-fills `progress.custom` with months/sections/topics, ready-made roadmap templates, or a stored definition (which would need a new column).
 
 ---
 
@@ -123,26 +123,13 @@ Z-order: roadmap app (50) < dashboard (350) < modal (400) < toasts (450) < auth 
 
 ---
 
-## 6. Migration from the Single-Roadmap Schema
+## 6. Tests
 
-On startup `openDb` runs `migrateLegacyUserData`:
-
-1. If a `user_data` table exists, one transaction gives every account without a roadmap the AI Engineer roadmap row, copies each `user_data` row into `roadmap_progress` (data, version, updated_at preserved), and renames `user_data` to `user_data_legacy`.
-2. On later boots `user_data` no longer exists, so nothing runs. A roadmap the user deleted is **never re-seeded**.
-
-The legacy table is renamed rather than dropped so the original data stays recoverable. Drop it manually once the new schema has been verified in production.
-
-**Rollout note:** an older server instance still running against the same database will fail once `user_data` is renamed. Switch all instances over together. Phase 2 itself needs no schema change or migration.
+`test/roadmaps.test.js` covers seeding, list/progress responses, authentication, cross-user isolation, malformed ids, delete (including progress removal), restore rules, atomic registration, and — for custom roadmaps — creation, start-month seeding (version 1), input validation, markup in names stored verbatim, the 20-roadmap cap, cross-user access and delete. `test/api.test.js` exercises the shared auth and progress behaviour through the per-roadmap endpoints. The whole suite has 58 tests.
 
 ---
 
-## 7. Tests
-
-`test/roadmaps.test.js` covers seeding, list/progress responses, authentication, cross-user isolation, malformed ids, delete (including progress removal), restore rules, atomic registration, the migration (including no re-seed after delete), and — for custom roadmaps — creation, start-month seeding (version 1), input validation, markup in names stored verbatim, the 20-roadmap cap, cross-user access and delete. `test/api.test.js` exercises the shared auth and progress behaviour through the per-roadmap endpoints. The whole suite has 59 tests.
-
----
-
-## 8. Known Limits
+## 7. Known Limits
 
 - Roadmap name and description cannot be edited after creation.
 - Dashboard cards do not show a completion percentage (it would need every roadmap's progress; planned as a lightweight stats endpoint). "Last activity" is the last progress save, and for a roadmap created with a start month that includes its creation.

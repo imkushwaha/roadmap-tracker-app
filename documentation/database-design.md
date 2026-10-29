@@ -9,7 +9,7 @@ The application uses **[Turso](https://turso.tech)** (hosted libSQL, a SQLite-co
 - `file:<path>` — local SQLite file; the development default is `./data/app.db` when no URL is set
 - `:memory:` — in-process database used by the test suite
 
-**Startup:** `openDb(url, authToken)` (async) creates the client, applies the schema with `client.batch(SCHEMA_STATEMENTS, "write")`, runs the idempotent column additions (`first_name`/`last_name`), then runs the one-time legacy migration (see [section 9](#9-migration-from-the-single-roadmap-schema)). No `PRAGMA journal_mode` is set by the application (journaling is managed by libSQL/Turso). Foreign-key constraints are enforced by libSQL by default; the test suite verifies this through the `ON DELETE CASCADE` tests.
+**Startup:** `openDb(url, authToken)` (async) creates the client, applies the schema with `client.batch(SCHEMA_STATEMENTS, "write")` (see [section 9](#9-schema-changes)). No `PRAGMA journal_mode` is set by the application (journaling is managed by libSQL/Turso). Foreign-key constraints are enforced by libSQL by default; the test suite verifies this through the `ON DELETE CASCADE` tests.
 
 Schema is created with `CREATE TABLE IF NOT EXISTS` guards, so startup is idempotent. All timestamps are stored as ISO-8601 text (`YYYY-MM-DDTHH:MM:SS.sssZ`).
 
@@ -108,7 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_roadmaps_user ON roadmaps(user_id);
 | `source` | TEXT | NOT NULL | `builtin_ai_engineer` (static AI Engineer curriculum, metadata-only row) or `custom` (user-built roadmap that starts empty); no CHECK constraint, so future sources need no migration |
 | `created_at` | TEXT | NOT NULL, DEFAULT | ISO-8601 UTC timestamp |
 
-The built-in name, description and source live in `server/roadmaps/builtin.js` (`BUILTIN_AI_ENGINEER`) and are shared by registration, the legacy migration and the restore endpoint. The `custom` source constant and the creation limits (name ≤ 80, description ≤ 300, at most 20 roadmaps per user) live in `server/roadmaps/validators.js`.
+The built-in name, description and source live in `server/roadmaps/builtin.js` (`BUILTIN_AI_ENGINEER`) and are shared by registration and the restore endpoint. The `custom` source constant and the creation limits (name ≤ 80, description ≤ 300, at most 20 roadmaps per user) live in `server/roadmaps/validators.js`.
 
 **There is no definition column.** A `custom` roadmap stores no curriculum of its own — its months, sections, topics and tasks live in its progress blob (`ProgressStore.custom`, section 4). The application treats the curriculum of a `custom` roadmap as empty (`BLANK_DATA`) and layers `custom` on top, exactly as it already does for user additions to the AI Engineer roadmap. This avoids a second source of truth and the problem of progress keys orphaned by a changed definition.
 
@@ -315,20 +315,6 @@ Returns `null` data for a roadmap that has never been saved (no row yet) — rep
 
 ---
 
-## 9. Migration from the single-roadmap schema
+## 9. Schema changes
 
-Before multi-roadmap support, each user had one row in a `user_data` table (`user_id` PK, `data`, `version`, `updated_at`). `migrateLegacyUserData` in `server/db.js` moves that data on the first boot of the new code:
-
-1. **Guard.** It runs only if a table named `user_data` exists in `sqlite_master`. A fresh database never has one, and the step below removes it, so later boots skip the migration entirely.
-2. **One transaction** (`client.batch([...], "write")`):
-   1. `INSERT INTO roadmaps … SELECT … FROM users u WHERE NOT EXISTS (SELECT 1 FROM roadmaps r WHERE r.user_id = u.id)` — gives **every** account, including ones that never saved, the built-in AI Engineer roadmap.
-   2. `INSERT INTO roadmap_progress … SELECT r.id, ud.data, ud.version, ud.updated_at FROM roadmaps r JOIN user_data ud ON ud.user_id = r.user_id WHERE r.source = ?` — copies each user's saved progress and **keeps its `version` and `updated_at`**, so open browser tabs and CAS saves keep working.
-   3. `ALTER TABLE user_data RENAME TO user_data_legacy`.
-3. **Rename, not drop.** The old data stays in `user_data_legacy` as a safety net. Nothing reads it; drop it manually (`DROP TABLE user_data_legacy`) once the new schema is confirmed healthy.
-
-Because the guard is "`user_data` exists", a user who later deletes their AI Engineer roadmap is **not** re-seeded on the next boot.
-
-**Rollout notes**
-- Deploy as a single switch. An older server instance still running against the same database would fail once `user_data` is renamed, so stop old instances before (or as) the new one boots.
-- The migration was verified against a copy of a real development database (account and progress version preserved) and by `test/roadmaps.test.js`.
-- To roll back, stop the new code, then `ALTER TABLE user_data_legacy RENAME TO user_data` (progress saved after the migration lives only in `roadmap_progress` and would be lost on the old code).
+The schema is applied on every start with `CREATE TABLE / INDEX IF NOT EXISTS` (`SCHEMA_STATEMENTS` in `server/db.js`), so a new or empty database is ready after the first boot. There is no migration framework: the development database was reset on 2026-10-29 (test users only), so the code carries no upgrade paths from earlier layouts. A change to the columns of an existing table in a database that already holds real data needs an explicit migration added at that point.

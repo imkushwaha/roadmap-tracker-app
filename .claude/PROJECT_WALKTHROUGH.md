@@ -51,7 +51,7 @@ roadmap-dashboard/
 │   ├── index.js                Entry point — boot, port bind, graceful shutdown
 │   ├── app.js                  createApp() factory — composes everything, fully testable
 │   ├── config.js               loadConfig() — reads + validates env vars
-│   ├── db.js                   openDb() — libSQL client + schema + column migrations + legacy user_data migration
+│   ├── db.js                   openDb() — libSQL client + schema (SCHEMA_STATEMENTS)
 │   ├── auth/
 │   │   ├── service.js          Pure helpers: bcrypt, JWT, cookie options, requireAuth MW
 │   │   └── validators.js       validateUsername / validatePassword / validateName
@@ -69,7 +69,7 @@ roadmap-dashboard/
 │
 ├── test/
 │   ├── api.test.js             Integration tests (auth flow, progress CRUD, concurrency, isolation)
-│   ├── roadmaps.test.js        Roadmap list/create/restore/delete, custom-roadmap validation + cap, ownership, atomic register, migration
+│   ├── roadmaps.test.js        Roadmap list/create/restore/delete, custom-roadmap validation + cap, ownership, atomic register
 │   ├── config.test.js          Unit tests for loadConfig()
 │   ├── schema.test.js          Unit tests for validateProgress()
 │   └── helpers.js              Test harness: startServer(), client(), creds(), sampleData
@@ -135,9 +135,7 @@ to `./data/app.db`.
 
 ### `server/db.js` — `openDb(url, authToken)`
 Creates a `@libsql/client` instance, runs `SCHEMA_STATEMENTS` as a batch (`CREATE TABLE IF NOT
-EXISTS` so startup is idempotent), runs `MIGRATION_STATEMENTS` one-by-one (adds `first_name` /
-`last_name` columns to existing databases, silently ignoring duplicate-column errors), then calls
-`migrateLegacyUserData`.
+EXISTS` so startup is idempotent). There are no migrations; the dev database was reset on 2026-10-29.
 
 **Schema — three tables:**
 ```
@@ -148,11 +146,6 @@ roadmap_progress  roadmap_id(PK, FK→roadmaps.id CASCADE) | data(JSON text) | v
 `source = "builtin_ai_engineer"` rows are metadata only — the curriculum is the static `data/roadmap.js`.
 `source = "custom"` rows are user-built roadmaps with **no stored curriculum or definition column**: their
 months, sections, topics and tasks live in the roadmap's progress blob under `custom`.
-
-**Legacy migration:** if a `user_data` table exists (the old one-roadmap-per-user schema), one
-transaction gives every user the built-in roadmap, copies each `user_data` row into
-`roadmap_progress` (keeping version + updated_at) and renames the table to `user_data_legacy`.
-No `user_data` table → no-op, so a deleted roadmap is never re-seeded on a later boot.
 
 ### `server/app.js` — `createApp(options)`
 Pure factory. No global state. Testable by injecting an in-memory DB and ephemeral port.
@@ -196,7 +189,7 @@ Login uses `dummyHash` when the username is not found to ensure identical respon
 
 ### `server/roadmaps/builtin.js`
 `BUILTIN_AI_ENGINEER` — the frozen `{ source, name, description }` of the starter roadmap, shared by
-registration, the legacy migration and the restore endpoint.
+registration and the restore endpoint.
 
 ### `server/roadmaps/validators.js`, `progress.js`, `repository.js`
 - `validateRoadmapInput(body)` → `{ valid, value: { name, description, startMonth } }` or `{ valid: false, error }`:
@@ -395,12 +388,12 @@ Version 0 means "no row yet" — triggers `INSERT ... ON CONFLICT DO NOTHING` (s
 
 ## 10. Testing
 
-Tests run with Node's built-in test runner: `npm test` → `node --test "test/*.test.js"` (59 tests).
+Tests run with Node's built-in test runner: `npm test` → `node --test "test/*.test.js"` (58 tests).
 
 | File | What it tests |
 |---|---|
 | `test/api.test.js` | Full integration: auth flow, progress CRUD via `/api/roadmaps/:id/progress`, optimistic concurrency, cross-user isolation, cascade delete |
-| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (404s), atomic registration, one-time `user_data` migration, and custom roadmaps (create, start-month seeding at version 1, input validation, markup stored verbatim, the 20-roadmap cap, cross-user access, progress removed on delete) |
+| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (404s), atomic registration, and custom roadmaps (create, start-month seeding at version 1, input validation, markup stored verbatim, the 20-roadmap cap, cross-user access, progress removed on delete) |
 | `test/config.test.js` | `loadConfig()` validation, error cases, env var parsing |
 | `test/schema.test.js` | `validateProgress()` acceptance and rejection cases |
 | `test/helpers.js` | `startServer()` (in-memory DB, ephemeral port), HTTP `client()` with cookie jar, `creds()` (includes first/last name), `dp(client)` (progress path of the first roadmap), `sampleData()` |
@@ -417,9 +410,6 @@ Tests run with Node's built-in test runner: `npm test` → `node --test "test/*.
 - `TRUST_PROXY=1` for Render's reverse proxy
 
 No persistent disk needed — all data lives in Turso.
-
-**Phase 1 rollout:** on first boot the new code migrates `user_data` → `roadmaps` + `roadmap_progress` and renames the old table to `user_data_legacy`. Stop any older instance before the new one boots, since the old code can no longer find `user_data`. **Phase 2** needs no schema change or migration.
-
 ---
 
 ## 12. Hardcoded "AI Engineer" References (Refactor Status)
