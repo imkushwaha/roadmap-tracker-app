@@ -17,7 +17,8 @@ const {
   getCurrentUser,
   buildCookieOptions,
 } = require("../auth/service");
-const { validateUsername, validatePassword } = require("../auth/validators");
+const { validateName, validateUsername, validatePassword } = require("../auth/validators");
+const { BUILTIN_AI_ENGINEER } = require("../roadmaps/builtin");
 
 const SESSION_DAYS = 7;
 const RATE_LIMIT_MESSAGE = {
@@ -25,9 +26,20 @@ const RATE_LIMIT_MESSAGE = {
 };
 
 /**
+ * Whether *err* is a SQLite unique-constraint violation (local or Turso).
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isUniqueViolation(err) {
+  return (
+    err?.code === "SQLITE_CONSTRAINT_UNIQUE" ||
+    /UNIQUE constraint failed/i.test(err?.message ?? "")
+  );
+}
+
+/**
  * @typedef {object} AuthRouterOptions
- * @property {import('better-sqlite3').Database} db
- * @property {import('better-sqlite3').Statement} userByIdStmt - Shared prepared statement.
+ * @property {import('@libsql/client').Client} db
  * @property {string} secret - JWT signing secret.
  * @property {boolean} [cookieSecure] - Whether to set the `Secure` cookie flag.
  * @property {number} [bcryptCost] - bcrypt cost factor.
@@ -41,18 +53,12 @@ const RATE_LIMIT_MESSAGE = {
  */
 function createAuthRouter({
   db,
-  userByIdStmt,
   secret,
   cookieSecure = false,
   bcryptCost = 12,
   rateLimitConfig = { windowMs: 15 * 60 * 1000, max: 10 },
 }) {
   const router = express.Router();
-
-  const q = {
-    userByName: db.prepare("SELECT id, username, password_hash FROM users WHERE username = ?"),
-    insertUser: db.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)"),
-  };
 
   const dummyHash = computeDummyHash(bcryptCost);
   const opts = () => buildCookieOptions(cookieSecure, SESSION_DAYS);
@@ -72,9 +78,31 @@ function createAuthRouter({
   // Only failed logins count toward the login limit so normal use never locks out.
   const registerLimiter = expressRateLimit({ ...rateLimitBase });
   const loginLimiter = expressRateLimit({ ...rateLimitBase, skipSuccessfulRequests: true });
+  const checkUsernameLimiter = expressRateLimit({
+    ...rateLimitBase,
+    limit: 30,
+    message: RATE_LIMIT_MESSAGE,
+  });
+
+  router.get("/check-username", checkUsernameLimiter, async (req, res) => {
+    const { username } = req.query;
+    const uCheck = validateUsername(username);
+    if (!uCheck.valid) return res.status(400).json({ error: uCheck.error });
+    const found = await db.execute({
+      sql: "SELECT 1 FROM users WHERE username = ?",
+      args: [username],
+    });
+    res.json({ available: found.rows.length === 0 });
+  });
 
   router.post("/register", registerLimiter, async (req, res) => {
-    const { username, password } = req.body || {};
+    const { firstName, lastName, username, password } = req.body || {};
+
+    const fnCheck = validateName(firstName, "First name");
+    if (!fnCheck.valid) return res.status(400).json({ error: fnCheck.error });
+
+    const lnCheck = validateName(lastName, "Last name");
+    if (!lnCheck.valid) return res.status(400).json({ error: lnCheck.error });
 
     const uCheck = validateUsername(username);
     if (!uCheck.valid) return res.status(400).json({ error: uCheck.error });
@@ -83,18 +111,31 @@ function createAuthRouter({
     if (!pCheck.valid) return res.status(400).json({ error: pCheck.error });
 
     const hash = await hashPassword(password, bcryptCost);
+    const fn = firstName.trim();
+    const ln = lastName.trim();
     let id;
     try {
-      id = q.insertUser.run(username, hash).lastInsertRowid;
+      // One transaction: an account never exists without its starter roadmap.
+      const [created] = await db.batch([
+        {
+          sql: "INSERT INTO users (username, password_hash, first_name, last_name) VALUES (?, ?, ?, ?)",
+          args: [username, hash, fn, ln],
+        },
+        {
+          sql: "INSERT INTO roadmaps (user_id, name, description, source) VALUES (last_insert_rowid(), ?, ?, ?)",
+          args: [BUILTIN_AI_ENGINEER.name, BUILTIN_AI_ENGINEER.description, BUILTIN_AI_ENGINEER.source],
+        },
+      ], "write");
+      id = created.lastInsertRowid;
     } catch (e) {
-      if (e?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      if (isUniqueViolation(e)) {
         return res.status(409).json({ error: "That username is already taken." });
       }
       throw e;
     }
-    const user = { id: Number(id), username };
+    const user = { id: Number(id), username, firstName: fn, lastName: ln };
     issueSession(res, user);
-    res.status(201).json({ user: { username } });
+    res.status(201).json({ user: { username, firstName: fn, lastName: ln } });
   });
 
   router.post("/login", loginLimiter, async (req, res) => {
@@ -107,11 +148,21 @@ function createAuthRouter({
     ) {
       return invalid();
     }
-    const row = q.userByName.get(username);
+    const found = await db.execute({
+      sql: "SELECT id, username, password_hash, first_name, last_name FROM users WHERE username = ?",
+      args: [username],
+    });
+    const row = found.rows[0];
     const ok = await verifyPassword(password, row ? row.password_hash : dummyHash);
     if (!row || !ok) return invalid();
-    issueSession(res, row);
-    res.json({ user: { username: row.username } });
+    const u = {
+      id: Number(row.id),
+      username: String(row.username),
+      firstName: String(row.first_name || ""),
+      lastName: String(row.last_name || ""),
+    };
+    issueSession(res, u);
+    res.json({ user: { username: u.username, firstName: u.firstName, lastName: u.lastName } });
   });
 
   router.post("/logout", (_req, res) => {
@@ -120,11 +171,11 @@ function createAuthRouter({
     res.status(204).end();
   });
 
-  router.get("/me", (req, res) => {
-    const user = getCurrentUser(req, userByIdStmt, secret);
+  router.get("/me", async (req, res) => {
+    const user = await getCurrentUser(req, db, secret);
     if (!user) return res.status(401).json({ error: "Not authenticated" });
     issueSession(res, user); // rolling session: active users stay logged in
-    res.json({ user: { username: user.username } });
+    res.json({ user: { username: user.username, firstName: user.firstName, lastName: user.lastName } });
   });
 
   return router;

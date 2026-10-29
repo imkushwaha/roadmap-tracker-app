@@ -1,45 +1,50 @@
 /**
  * @module db
- * SQLite database initialisation. Opens (or creates) the database, applies
- * the schema, and returns a ready-to-use connection.
+ * Database initialisation. Connects to Turso (hosted libSQL), or to a local
+ * libSQL/SQLite target (`:memory:` or `file:` URL) for development and tests,
+ * and applies the schema.
  */
 "use strict";
 
-const fs = require("node:fs");
-const path = require("node:path");
-const Database = require("better-sqlite3");
+const { createClient } = require("@libsql/client");
 
-const SCHEMA_SQL = `
-  CREATE TABLE IF NOT EXISTS users (
+const SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
+    first_name    TEXT NOT NULL DEFAULT '',
+    last_name     TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  );
-  CREATE TABLE IF NOT EXISTS user_data (
-    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  )`,
+  `CREATE TABLE IF NOT EXISTS roadmaps (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_roadmaps_user ON roadmaps(user_id)`,
+  `CREATE TABLE IF NOT EXISTS roadmap_progress (
+    roadmap_id INTEGER PRIMARY KEY REFERENCES roadmaps(id) ON DELETE CASCADE,
     data       TEXT NOT NULL,
     version    INTEGER NOT NULL,
     updated_at TEXT NOT NULL
-  );
-`;
+  )`,
+];
 
 /**
- * Open (or create) the SQLite database at *dbPath* and apply the schema.
+ * Connect to the database at *url* and apply the schema.
  *
- * Uses WAL journal mode and enforces foreign-key constraints. Creates the
- * parent directory automatically for file-backed databases.
- *
- * @param {string} dbPath - Absolute file path, or `":memory:"` for an in-memory database.
- * @returns {import('better-sqlite3').Database}
+ * @param {string} url - `libsql://…` (Turso), `file:…`, or `":memory:"`.
+ * @param {string} [authToken] - Turso auth token; not needed for local targets.
+ * @returns {Promise<import('@libsql/client').Client>}
  */
-function openDb(dbPath) {
-  if (dbPath !== ":memory:") fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(SCHEMA_SQL);
-  return db;
+async function openDb(url, authToken) {
+  const client = createClient({ url, authToken: authToken || undefined });
+  await client.batch(SCHEMA_STATEMENTS, "write");
+  return client;
 }
 
 module.exports = { openDb };

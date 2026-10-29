@@ -14,10 +14,10 @@ const SECRET = "test-secret-test-secret-test-secret-123456";
  * Boot a real HTTP server on an ephemeral port backed by an in-memory database.
  *
  * @param {Partial<import('../server/app').AppOptions>} [overrides]
- * @returns {Promise<{ db: import('better-sqlite3').Database, base: string, close: () => Promise<void> }>}
+ * @returns {Promise<{ db: import('@libsql/client').Client, base: string, close: () => Promise<void> }>}
  */
 async function startServer(overrides = {}) {
-  const db = overrides.db || openDb(":memory:");
+  const db = overrides.db || await openDb(":memory:");
   const app = createApp({
     db,
     sessionSecret: SECRET,
@@ -104,9 +104,26 @@ function client(base) {
  * Build a registration credentials object.
  * @param {string} username
  * @param {string} [password]
- * @returns {{ username: string, password: string }}
+ * @returns {{ firstName: string, lastName: string, username: string, password: string }}
  */
-const creds = (username, password = "correct-horse-1") => ({ username, password });
+const creds = (username, password = "correct-horse-1") => ({
+  firstName: "Test",
+  lastName: "User",
+  username,
+  password,
+});
+
+/**
+ * Resolve the progress endpoint of the logged-in client's first roadmap (the
+ * seeded AI Engineer one). Looked up fresh each call so a client that logs out
+ * and registers as someone else never reuses a stale id.
+ * @param {TestClient} c
+ * @returns {Promise<string>}
+ */
+async function dp(c) {
+  const res = await c.get("/api/roadmaps");
+  return `/api/roadmaps/${res.body.roadmaps[0].id}/progress`;
+}
 
 /**
  * Return a minimal valid progress data object, merging any provided overrides.
@@ -132,4 +149,4 @@ function sampleData(overrides = {}) {
   };
 }
 
-module.exports = { startServer, client, creds, sampleData, SECRET };
+module.exports = { startServer, client, creds, sampleData, dp, SECRET };

@@ -89,31 +89,47 @@ function buildCookieOptions(secure, sessionDays) {
 /**
  * Extract the authenticated user from the session cookie, or return null.
  * @param {import('express').Request} req
- * @param {import('better-sqlite3').Statement} userByIdStmt
+ * @param {import('@libsql/client').Client} db
  * @param {string} secret
- * @returns {{ id: number, username: string } | null}
+ * @returns {Promise<{ id: number, username: string } | null>}
  */
-function getCurrentUser(req, userByIdStmt, secret) {
+async function getCurrentUser(req, db, secret) {
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return null;
   const payload = verifyToken(token, secret);
   if (!payload) return null;
-  return userByIdStmt.get(Number(payload.sub)) || null;
+  const result = await db.execute({
+    sql: "SELECT id, username, first_name, last_name FROM users WHERE id = ?",
+    args: [Number(payload.sub)],
+  });
+  const row = result.rows[0];
+  return row
+    ? {
+        id: Number(row.id),
+        username: String(row.username),
+        firstName: String(row.first_name || ""),
+        lastName: String(row.last_name || ""),
+      }
+    : null;
 }
 
 /**
  * Create an Express middleware that resolves the session user and sets
  * `req.user`, or sends a 401 response when no valid session exists.
- * @param {import('better-sqlite3').Statement} userByIdStmt
+ * @param {import('@libsql/client').Client} db
  * @param {string} secret
  * @returns {import('express').RequestHandler}
  */
-function createRequireAuth(userByIdStmt, secret) {
-  return function requireAuth(req, res, next) {
-    const user = getCurrentUser(req, userByIdStmt, secret);
-    if (!user) return res.status(401).json({ error: "Not authenticated" });
-    req.user = user;
-    next();
+function createRequireAuth(db, secret) {
+  return async function requireAuth(req, res, next) {
+    try {
+      const user = await getCurrentUser(req, db, secret);
+      if (!user) return res.status(401).json({ error: "Not authenticated" });
+      req.user = user;
+      next();
+    } catch (err) {
+      next(err);
+    }
   };
 }
 

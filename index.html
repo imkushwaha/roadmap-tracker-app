@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AI Engineer Roadmap — Progress Dashboard</title>
+<title>Roadmap Tracker</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧭</text></svg>" />
 <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -13,62 +13,137 @@
 
 <div id="authScreen" class="auth-screen hidden">
   <form id="authForm" class="auth-card" novalidate>
-    <div class="auth-brand"><span aria-hidden="true">🧭</span> AI Engineer Roadmap</div>
+    <div class="auth-brand"><span aria-hidden="true">🧭</span> Roadmap Tracker</div>
     <h2 id="authTitle">Log in</h2>
     <p id="authNotice" class="auth-notice hidden"></p>
+
+    <!-- Register-only fields (hidden during login) -->
+    <div id="authRegisterFields" class="hidden">
+      <div class="field">
+        <label for="authFirstName">First Name</label>
+        <input id="authFirstName" type="text" autocomplete="given-name" autocapitalize="words" maxlength="64" />
+      </div>
+      <div class="field">
+        <label for="authLastName">Last Name</label>
+        <input id="authLastName" type="text" autocomplete="family-name" autocapitalize="words" maxlength="64" />
+      </div>
+    </div>
+
     <div class="field">
-      <label for="authUsername">Username</label>
+      <label id="authUsernameLabel" for="authUsername">Username</label>
       <input id="authUsername" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" />
+      <p id="authUsernameStatus" class="auth-field-hint"></p>
     </div>
     <div class="field">
       <label for="authPassword">Password</label>
       <input id="authPassword" type="password" autocomplete="current-password" maxlength="72" />
     </div>
-    <p id="authHint" class="auth-hint hidden">Username: 3–32 letters, numbers, _ or -. Password: at least 8 characters.</p>
+
+    <!-- Confirm password — register only -->
+    <div id="authConfirmPasswordField" class="field hidden">
+      <label for="authConfirmPassword">Confirm Password</label>
+      <input id="authConfirmPassword" type="password" autocomplete="new-password" maxlength="72" />
+      <p id="authPasswordMatch" class="auth-field-hint"></p>
+    </div>
+
+    <p id="authHint" class="auth-hint hidden">User ID: 3–32 letters, numbers, _ or -. Password: at least 8 characters.</p>
     <p id="authError" class="auth-error" role="alert"></p>
     <button id="authSubmit" class="btn btn-primary auth-submit" type="submit">Log in</button>
     <p class="auth-toggle"><span id="authToggleText">New here?</span> <button type="button" id="authToggle" class="link-btn">Create an account</button></p>
     <button type="button" id="authDownload" class="link-btn hidden">⬇ Download my unsaved changes (JSON)</button>
   </form>
   <div id="authBlock" class="auth-card hidden">
-    <div class="auth-brand"><span aria-hidden="true">🧭</span> AI Engineer Roadmap</div>
+    <div class="auth-brand"><span aria-hidden="true">🧭</span> Roadmap Tracker</div>
     <h2 id="authBlockTitle"></h2>
     <p id="authBlockText" class="auth-notice"></p>
     <div id="authBlockActions" class="modal-actions"></div>
   </div>
+
+  <footer class="auth-footer">
+    <div class="auth-footer-inner">
+      <span class="auth-footer-copy">&copy; <span id="authFooterYear"></span> Roadmap Tracker. All rights reserved.</span>
+      <span class="auth-footer-sep">·</span>
+      <span>Developed by
+        <a class="auth-footer-link" href="mailto:upendra.kumar48762@gmail.com">upendra.kumar48762@gmail.com</a>
+        &nbsp;|&nbsp;
+        <a class="auth-footer-link" href="https://github.com/imkushwaha" target="_blank" rel="noopener">GitHub: imkushwaha</a>
+      </span>
+      <span class="auth-footer-sep">·</span>
+      <span>If this tool helps you, please ⭐ <a class="auth-footer-link" href="https://github.com/imkushwaha" target="_blank" rel="noopener">star the repo</a>!</span>
+      <span class="auth-footer-sep">·</span>
+      <span>Built with planning &amp; development assistance from <strong>Claude</strong> (Anthropic AI).</span>
+      <span class="auth-footer-sep">·</span>
+      <span>Open source &mdash; contributions welcome.</span>
+    </div>
+  </footer>
+</div>
+
+<div id="dashboardScreen" class="dashboard-screen hidden">
+  <div class="dashboard-bar">
+    <div class="dashboard-bar-inner">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">🧭</span>
+        <div>
+          <h1>Roadmap Tracker</h1>
+          <p class="subtitle" id="dashboardGreeting"></p>
+        </div>
+      </div>
+      <button type="button" class="btn" id="dashboardLogoutBtn">Log out</button>
+    </div>
+  </div>
+  <div class="dashboard-content" id="dashboardContent" aria-live="polite"></div>
 </div>
 
 <header class="app-header">
   <div class="header-inner">
     <div class="brand">
+      <button type="button" class="back-btn" id="backToDashboardBtn" aria-label="Back to all roadmaps" title="All roadmaps">←</button>
       <span class="brand-icon" aria-hidden="true">🧭</span>
       <div>
-        <h1>AI Engineer Roadmap</h1>
-        <p class="subtitle">Tier-1 Production AI Engineer — 10-Month Execution Tracker</p>
+        <h1 id="roadmapTitle">Roadmap</h1>
+        <p class="subtitle" id="roadmapSubtitle"></p>
       </div>
     </div>
-    <div class="header-actions">
-      <button id="saveStatus" class="save-status" type="button" aria-live="polite"></button>
-      <span id="userChip" class="user-chip hidden" title=""><span aria-hidden="true">👤</span> <span id="userName" class="user-name"></span></span>
-      <button id="logoutBtn" class="btn-sm hidden" type="button">Log out</button>
-      <button id="searchToggle" class="icon-btn" title="Search" aria-label="Search">🔎</button>
-      <button id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
-      <button id="dataMenuToggle" class="icon-btn" title="Data: export / import / reset" aria-label="Data menu">⋮</button>
-      <div id="dataMenu" class="dropdown-menu hidden">
-        <button id="startMonthBtn">📅 Set start month…</button>
-        <div class="dropdown-sep"></div>
-        <button id="exportBtn">⬇ Export progress (JSON)</button>
-        <button id="importBtn">⬆ Import progress (JSON)</button>
-        <button id="legacyImportBtn" class="hidden">🗂 Import old data from this browser…</button>
-        <input type="file" id="importFile" accept="application/json" class="hidden" />
-        <div class="dropdown-sep"></div>
-        <button id="resetBtn" class="danger">⟲ Reset progress…</button>
+    <div class="profile-anchor" id="profileAnchor">
+      <button class="profile-trigger" id="profileTrigger" aria-haspopup="true" aria-expanded="false">
+        <span class="profile-trigger-avatar" aria-hidden="true">👤</span>
+        <span class="profile-trigger-name" id="profileName">—</span>
+        <span class="profile-trigger-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="profile-panel hidden" id="profilePanel" role="menu">
+        <div class="profile-panel-header">
+          <span class="profile-panel-fullname" id="panelFullName">—</span>
+          <span class="profile-panel-username" id="panelUsername">—</span>
+          <span class="profile-panel-save" id="panelSaveStatus" aria-live="polite"></span>
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <label class="profile-panel-label" for="panelSearch">Search</label>
+          <input type="search" id="panelSearch" class="profile-panel-search" placeholder="Search topics, tasks, notes…" aria-label="Search tasks" autocomplete="off" />
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <span class="profile-panel-label">Theme</span>
+          <div class="profile-theme-btns">
+            <button class="profile-theme-btn" id="themeLightBtn" data-theme="light">Light</button>
+            <button class="profile-theme-btn" id="themeDarkBtn" data-theme="dark">Dark</button>
+          </div>
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <button class="profile-action-btn" id="startMonthBtn">📅 Set start month…</button>
+          <button class="profile-action-btn" id="exportBtn">⬇ Export progress (JSON)</button>
+          <button class="profile-action-btn" id="importBtn">⬆ Import progress (JSON)</button>
+          <input type="file" id="importFile" accept="application/json" class="hidden" />
+          <button id="legacyImportBtn" class="profile-action-btn hidden">🗂 Import old data from this browser…</button>
+          <button class="profile-action-btn danger" id="resetBtn">⟲ Reset progress…</button>
+        </div>
+        <div class="profile-panel-sep"></div>
+        <div class="profile-panel-section">
+          <button class="profile-action-btn profile-logout" id="logoutBtn">Log out</button>
+        </div>
       </div>
     </div>
-  </div>
-  <div id="searchBar" class="search-bar hidden">
-    <input id="searchInput" type="search" placeholder="Search topics, tasks, notes…" aria-label="Search tasks" />
-    <button id="searchClose" class="icon-btn" aria-label="Close search">✕</button>
   </div>
   <nav class="tabs" id="tabs">
     <button class="tab active" data-view="overview">Overview</button>
