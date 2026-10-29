@@ -1,6 +1,6 @@
 /**
  * @module app
- * Express application factory. Composes middleware, auth and data routers,
+ * Express application factory. Composes middleware, auth and roadmap routers,
  * static file serving, and error handling into a configured Express instance.
  *
  * Every concern lives in its own module; this file is intentionally thin.
@@ -13,12 +13,12 @@ const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const { PROJECT_ROOT } = require("./config");
 const { createAuthRouter } = require("./routes/auth");
-const { createDataRouter } = require("./routes/data");
+const { createRoadmapsRouter } = require("./routes/roadmaps");
 const { COOKIE_NAME, createRequireAuth } = require("./auth/service");
 
 /**
  * @typedef {object} AppOptions
- * @property {import('better-sqlite3').Database} db
+ * @property {import('@libsql/client').Client} db
  * @property {string} sessionSecret
  * @property {boolean} [cookieSecure] - Set the `Secure` flag on session cookies.
  * @property {boolean|string|number} [trustProxy] - Passed to Express `trust proxy`.
@@ -50,23 +50,19 @@ function createApp({
   app.disable("x-powered-by");
   if (trustProxy) app.set("trust proxy", trustProxy);
 
-  // One shared prepared statement used by both the auth router's /me endpoint
-  // and the requireAuth middleware passed to the data router.
-  const userByIdStmt = db.prepare("SELECT id, username FROM users WHERE id = ?");
-  const requireAuth = createRequireAuth(userByIdStmt, sessionSecret);
+  const requireAuth = createRequireAuth(db, sessionSecret);
 
   _applyMiddleware(app, bodyLimit);
 
   app.use("/api/auth", createAuthRouter({
     db,
-    userByIdStmt,
     secret: sessionSecret,
     cookieSecure,
     bcryptCost,
     rateLimitConfig: authRateLimit,
   }));
 
-  app.use("/api/data", createDataRouter({ db, requireAuth }));
+  app.use("/api/roadmaps", createRoadmapsRouter({ db, requireAuth }));
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 

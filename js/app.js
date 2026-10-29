@@ -6,7 +6,18 @@
 (function () {
   "use strict";
 
-  const DATA = window.ROADMAP_DATA;
+  const BUILTIN_DATA = window.ROADMAP_DATA;
+  // Custom roadmaps ship no curriculum: every month, section, topic and task
+  // comes from the user's own additions (progress.custom).
+  const BLANK_DATA = Object.freeze({
+    meta: { horizonStart: null },
+    phases: [],
+    counters: [],
+    masteryChecklist: [],
+    reference: [],
+  });
+  // The curriculum of the roadmap that is currently open.
+  let DATA = BUILTIN_DATA;
   const STORAGE_KEY = "roadmap-dashboard:progress:v1";
   const THEME_KEY = "roadmap-dashboard:theme";
 
@@ -60,7 +71,7 @@
   // Every mutation calls persist(); it now just flags the data as changed and
   // schedules a debounced save to the server (see "Server sync" below).
   function persist() {
-    if (!session.username) return;
+    if (!session.username || session.roadmapId == null) return;
     session.dirty = true;
     if (session.conflict) return;
     if (session.saving) { setSaveStatus("saving"); return; }
@@ -316,7 +327,7 @@
     return phaseStartDate(1);
   }
   function horizonEnd() {
-    return phaseEndDate(allPhases().length);
+    return phaseEndDate(Math.max(1, allPhases().length));
   }
 
   function currentPhase() {
@@ -478,7 +489,24 @@
   // ---------------------------------------------------------
   // VIEW: Overview
   // ---------------------------------------------------------
+  function renderBlankRoadmap(container) {
+    container.innerHTML = `
+      <div class="section-title">Let's build your roadmap</div>
+      <div class="card blank-roadmap">
+        <p>This roadmap is empty. Lay it out the way the AI Engineer roadmap is organised:</p>
+        <ol>
+          <li><strong>Month</strong> — a block of time with an objective.</li>
+          <li><strong>Section</strong> — a week, or a theme, inside the month.</li>
+          <li><strong>Topic</strong> — a subject to cover in that section.</li>
+          <li><strong>Tasks</strong> — the checkable steps inside a topic.</li>
+        </ol>
+        <p>Start by adding your first month. You can add sections, topics and tasks from the Timeline at any time.</p>
+        <button class="btn btn-primary" data-action="add-month">＋ Add your first month</button>
+      </div>`;
+  }
+
   function renderOverview(container) {
+    if (allPhases().length === 0) { renderBlankRoadmap(container); return; }
     const overall = overallStats();
     const cur = currentPhase();
     const curSection = currentSection(cur);
@@ -559,7 +587,7 @@
         <div class="stat-tile"><div class="stat-label">${statusChip("not_started")}</div><div class="stat-value">${overall.notStarted}</div></div>
       </div>
 
-      <div class="section-title">Interview & career counters</div>
+      ${DATA.counters.length ? `<div class="section-title">Interview & career counters</div>` : ""}
       <div class="grid grid-stats">
         ${DATA.counters.map((c) => {
           const val = getCounter(c.id, c.current);
@@ -610,6 +638,7 @@
           </div>`;
         }).join("")}
       </div>
+      ${allPhases().length === 0 ? `<p class="empty-hint" style="margin-left:28px;">No months yet — add your first one below.</p>` : ""}
       <button class="add-topic-btn add-month-btn" data-action="add-month">＋ Add month (Month ${allPhases().length + 1} · ${esc(phaseCalendarLabel(allPhases().length + 1))})</button>
     `;
   }
@@ -720,7 +749,9 @@
         <span style="font-size:12px; color:var(--text-faint); margin-left:auto;">${entries.length} task${entries.length === 1 ? "" : "s"}</span>
       </div>
       <div id="checklistBody">
-        ${phaseIds.length === 0 ? emptyState("No tasks match your filters.") : phaseIds.map((pid) => {
+        ${phaseIds.length === 0 ? emptyState(INDEX.length
+          ? "No tasks match your filters."
+          : "This roadmap has no tasks yet. Add months, topics and tasks from the Timeline.") : phaseIds.map((pid) => {
           const phase = byPhase[pid];
           return `<div class="phase-section-group">
             <div class="psg-head">Month ${phase.number} — ${esc(phase.title)}</div>
@@ -791,9 +822,14 @@
   const kanbanState = { phase: null };
 
   function renderKanban(container) {
-    if (!kanbanState.phase) {
+    if (allPhases().length === 0) {
+      container.innerHTML = `<div class="section-title">Kanban</div>` +
+        emptyState("Add a month with some tasks from the Timeline to use the board.");
+      return;
+    }
+    if (!allPhases().some((p) => p.id === kanbanState.phase)) {
       const cur = currentPhase();
-      kanbanState.phase = cur ? cur.id : DATA.phases[0].id;
+      kanbanState.phase = cur ? cur.id : allPhases()[0].id;
     }
     const q = state.search.trim().toLowerCase();
     const entries = INDEX.filter((e) => e.phaseId === kanbanState.phase && matchesSearch(e, q));
@@ -1037,19 +1073,15 @@
     } else {
       document.documentElement.removeAttribute("data-theme");
     }
-    document.getElementById("themeToggle").textContent =
-      (theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)) ? "☀️" : "🌙";
+    const isDark = theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const lightBtn = document.getElementById("themeLightBtn");
+    const darkBtn = document.getElementById("themeDarkBtn");
+    if (lightBtn) lightBtn.classList.toggle("active", !isDark);
+    if (darkBtn) darkBtn.classList.toggle("active", isDark);
   }
   function initTheme() {
     const saved = localStorage.getItem(THEME_KEY);
     applyTheme(saved);
-  }
-  function toggleTheme() {
-    const current = document.documentElement.getAttribute("data-theme") ||
-      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = current === "dark" ? "light" : "dark";
-    localStorage.setItem(THEME_KEY, next);
-    applyTheme(next);
   }
 
   // ---------------------------------------------------------
@@ -1368,9 +1400,12 @@
     host.querySelector(".modal").innerHTML = `
       <h2>When does Month 1 start?</h2>
       <p style="font-size:13px; color:var(--text-muted);">
-        The roadmap was written assuming Month 1 = ${esc(phaseCalendarLabelFor(defaultStartMonth()))}.
-        Set your real start month and every phase, week and "you are here"
-        marker shifts to match — nothing else about your progress changes.
+        ${DATA === BUILTIN_DATA
+          ? `The roadmap was written assuming Month 1 = ${esc(phaseCalendarLabelFor(defaultStartMonth()))}.
+             Set your real start month and every phase, week and "you are here"
+             marker shifts to match — nothing else about your progress changes.`
+          : `Every month, week and "you are here" marker is counted from this start month.
+             Changing it shifts the whole plan — nothing else about your progress changes.`}
       </p>
       <div class="field">
         <label>Month 1 starts on</label>
@@ -1421,49 +1456,72 @@
       if (btn) setView(btn.dataset.view);
     });
 
-    document.getElementById("themeToggle").addEventListener("click", toggleTheme);
+    // Profile panel toggle
+    const profileTrigger = document.getElementById("profileTrigger");
+    const profilePanel = document.getElementById("profilePanel");
+    const closePanel = () => {
+      profilePanel.classList.add("hidden");
+      profileTrigger.setAttribute("aria-expanded", "false");
+    };
 
-    const searchToggle = document.getElementById("searchToggle");
-    const searchBar = document.getElementById("searchBar");
-    const searchInput = document.getElementById("searchInput");
-    searchToggle.addEventListener("click", () => {
-      searchBar.classList.toggle("hidden");
-      if (!searchBar.classList.contains("hidden")) searchInput.focus();
-    });
-    document.getElementById("searchClose").addEventListener("click", () => {
-      searchBar.classList.add("hidden");
-      searchInput.value = "";
-      state.search = "";
-      rerender();
-    });
-    searchInput.addEventListener("input", () => {
-      state.search = searchInput.value;
-      rerender();
-    });
-
-    const dataMenuToggle = document.getElementById("dataMenuToggle");
-    const dataMenu = document.getElementById("dataMenu");
-    dataMenuToggle.addEventListener("click", (e) => {
+    profileTrigger.addEventListener("click", (e) => {
       e.stopPropagation();
-      document.getElementById("legacyImportBtn").classList.toggle("hidden", !readLegacyLocalData());
-      dataMenu.classList.toggle("hidden");
+      const opening = profilePanel.classList.contains("hidden");
+      if (opening) {
+        document.getElementById("legacyImportBtn").classList.toggle("hidden", !readLegacyLocalData());
+      }
+      profilePanel.classList.toggle("hidden", !opening);
+      profileTrigger.setAttribute("aria-expanded", String(opening));
     });
+    document.addEventListener("click", (e) => {
+      if (!profilePanel.classList.contains("hidden") &&
+          !document.getElementById("profileAnchor").contains(e.target)) {
+        closePanel();
+      }
+    });
+
+    // Theme
+    document.getElementById("themeLightBtn").addEventListener("click", () => {
+      localStorage.setItem(THEME_KEY, "light");
+      applyTheme("light");
+    });
+    document.getElementById("themeDarkBtn").addEventListener("click", () => {
+      localStorage.setItem(THEME_KEY, "dark");
+      applyTheme("dark");
+    });
+
+    // Search (always visible inside profile panel)
+    const panelSearch = document.getElementById("panelSearch");
+    panelSearch.addEventListener("input", () => {
+      state.search = panelSearch.value;
+      rerender();
+    });
+
+    // Data actions
     document.getElementById("legacyImportBtn").addEventListener("click", () => {
-      dataMenu.classList.add("hidden");
+      closePanel();
       openLegacyModal(session.version > 0);
     });
-    document.addEventListener("click", () => dataMenu.classList.add("hidden"));
-    dataMenu.addEventListener("click", (e) => e.stopPropagation());
-
-    document.getElementById("exportBtn").addEventListener("click", () => { exportProgress(); dataMenu.classList.add("hidden"); });
-    document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importFile").click());
+    document.getElementById("exportBtn").addEventListener("click", () => {
+      exportProgress();
+      closePanel();
+    });
+    document.getElementById("importBtn").addEventListener("click", () => {
+      document.getElementById("importFile").click();
+      closePanel();
+    });
     document.getElementById("importFile").addEventListener("change", (e) => {
       if (e.target.files[0]) importProgress(e.target.files[0]);
       e.target.value = "";
-      dataMenu.classList.add("hidden");
     });
-    document.getElementById("resetBtn").addEventListener("click", () => { confirmReset(); dataMenu.classList.add("hidden"); });
-    document.getElementById("startMonthBtn").addEventListener("click", () => { openStartMonthModal(); dataMenu.classList.add("hidden"); });
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      confirmReset();
+      closePanel();
+    });
+    document.getElementById("startMonthBtn").addEventListener("click", () => {
+      openStartMonthModal();
+      closePanel();
+    });
 
     document.getElementById("modalHost").addEventListener("click", (e) => {
       if (e.target.classList.contains("modal-backdrop")) closeModal();
@@ -1513,6 +1571,7 @@
     if (action === "close-modal") closeModal();
     if (action === "save-modal") saveModal(e.target.dataset.id);
     if (action === "confirm-reset") doReset();
+    if (action === "confirm-delete-roadmap") deleteRoadmap(Number(e.target.dataset.id));
     if (action === "save-start-month") saveStartMonth();
     if (action === "conflict-load") resolveConflictLoadServer();
     if (action === "conflict-overwrite") resolveConflictOverwrite();
@@ -1616,7 +1675,8 @@
   const RETRY_DELAYS_MS = [2000, 5000, 15000];
 
   const session = {
-    username: null,     // set once data has loaded; persist() is a no-op before that
+    username: null,     // set while authenticated; persist() is a no-op without it
+    roadmapId: null,    // the open roadmap; null while on the dashboard
     version: 0,         // server version our copy is based on
     dirty: false,       // local changes not yet confirmed saved
     saving: false,      // a PUT is in flight
@@ -1635,8 +1695,8 @@
     error: "Save failed — click to retry", conflict: "Conflict — click to resolve",
   };
   function setSaveStatus(kind, detail) {
-    const el = $("saveStatus");
-    el.className = "save-status " + kind;
+    const el = $("panelSaveStatus");
+    el.className = "profile-panel-save " + kind;
     el.textContent = SAVE_LABELS[kind];
     el.title = detail || "";
     el.dataset.kind = kind;
@@ -1650,14 +1710,14 @@
   }
 
   async function flushSave() {
-    if (session.saving || !session.dirty || session.conflict || !session.username) return;
+    if (session.saving || !session.dirty || session.conflict || !session.username || session.roadmapId == null) return;
     clearTimeout(session.timer);
     session.saving = true;
     session.dirty = false;
     setSaveStatus("saving");
     const snapshot = JSON.parse(JSON.stringify(progress));
     try {
-      const r = await window.Api.putData(snapshot, session.version);
+      const r = await window.RoadmapApi.putProgress(session.roadmapId, snapshot, session.version);
       session.version = r.version;
       session.retries = 0;
       session.saving = false;
@@ -1755,11 +1815,24 @@
     $("authHint").classList.toggle("hidden", !reg);
     $("authPassword").autocomplete = reg ? "new-password" : "current-password";
     $("authError").textContent = "";
+    $("authRegisterFields").classList.toggle("hidden", !reg);
+    $("authConfirmPasswordField").classList.toggle("hidden", !reg);
+    $("authUsernameLabel").textContent = reg ? "User ID" : "Username";
+    $("authUsernameStatus").textContent = "";
+    $("authUsernameStatus").className = "auth-field-hint";
+    $("authPasswordMatch").textContent = "";
+    $("authPasswordMatch").className = "auth-field-hint";
+    if (!reg) {
+      $("authFirstName").value = "";
+      $("authLastName").value = "";
+      $("authConfirmPassword").value = "";
+    }
   }
 
   function showAuth(mode, notice, opts) {
     opts = opts || {};
     lockApp();
+    hideDashboard();
     setAuthMode(mode || "login");
     const n = $("authNotice");
     n.textContent = notice || "";
@@ -1802,18 +1875,30 @@
     err.textContent = "";
     if (!username || !password) { err.textContent = "Enter a username and password."; return; }
     if (authMode === "register") {
-      if (!/^[A-Za-z0-9_-]{3,32}$/.test(username)) { err.textContent = "Username must be 3–32 characters: letters, numbers, _ or -."; return; }
+      const firstName = $("authFirstName").value.trim();
+      const lastName  = $("authLastName").value.trim();
+      const confirmPassword = $("authConfirmPassword").value;
+      if (!firstName) { err.textContent = "Please enter your first name."; return; }
+      if (!lastName)  { err.textContent = "Please enter your last name."; return; }
+      if (!/^[A-Za-z0-9_-]{3,32}$/.test(username)) { err.textContent = "User ID must be 3–32 characters: letters, numbers, _ or -."; return; }
       if (password.length < 8) { err.textContent = "Password must be at least 8 characters."; return; }
+      if (password !== confirmPassword) { err.textContent = "Passwords do not match."; return; }
     }
     const btn = $("authSubmit");
     btn.disabled = true;
     try {
-      const res = authMode === "register"
-        ? await window.Api.register(username, password)
-        : await window.Api.login(username, password);
+      let res;
+      if (authMode === "register") {
+        const firstName = $("authFirstName").value.trim();
+        const lastName  = $("authLastName").value.trim();
+        res = await window.AuthApi.register(firstName, lastName, username, password);
+      } else {
+        res = await window.AuthApi.login(username, password);
+      }
       $("authPassword").value = "";
+      $("authConfirmPassword").value = "";
       session.expiredFor = null;
-      await loadUserData(res.user.username);
+      enterDashboard(res.user);
     } catch (e) {
       err.textContent = e.message;
     } finally {
@@ -1825,60 +1910,313 @@
     showBlock("Loading…", "");
     let me;
     try {
-      me = await window.Api.me();
+      me = await window.AuthApi.me();
     } catch (e) {
       if (e.status === 401) { showAuth("login"); return; }
       showBlock("Can't reach the server", e.message, [["Retry", boot]]);
       return;
     }
-    await loadUserData(me.user.username);
+    enterDashboard(me.user);
   }
 
-  async function loadUserData(username) {
-    showBlock("Loading your data…", "");
+  // Reset every piece of per-roadmap sync state; the account fields are kept.
+  function resetRoadmapSession(roadmapId, version) {
+    clearTimeout(session.timer);
+    Object.assign(session, { roadmapId, version, dirty: false, saving: false,
+      conflict: false, conflictServer: null, retries: 0, expiredFor: null });
+  }
+
+  // Called once the user is authenticated: lands them on the roadmap dashboard.
+  function enterDashboard(user) {
+    const firstName = user.firstName || "";
+    const lastName = user.lastName || "";
+    Object.assign(session, { username: user.username, firstName, lastName });
+    resetRoadmapSession(null, 0);
+    progress = normalizeProgress(null);
+    const fullName = [firstName, lastName].filter(Boolean).join(" ") || user.username;
+    $("profileName").textContent = fullName;
+    $("panelFullName").textContent = fullName;
+    $("panelUsername").textContent = "@" + user.username;
+    $("dashboardGreeting").textContent = "Signed in as " + fullName;
+    hideAuth();
+    showDashboard();
+  }
+
+  // ---------------------------------------------------------
+  // Roadmap dashboard (post-login landing page)
+  // ---------------------------------------------------------
+  let dashboardRoadmaps = [];
+
+  function hideDashboard() { $("dashboardScreen").classList.add("hidden"); }
+
+  async function showDashboard() {
+    lockApp();
+    document.title = "Roadmap Tracker";
+    $("dashboardScreen").classList.remove("hidden");
+    $("dashboardContent").innerHTML = `<p class="dashboard-status">Loading your roadmaps…</p>`;
     let res;
     try {
-      res = await window.Api.getData();
+      res = await window.RoadmapApi.list();
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      $("dashboardContent").innerHTML = `
+        <div class="dashboard-status">
+          <p>Couldn't load your roadmaps: ${esc(e.message)}</p>
+          <button type="button" class="btn btn-primary" data-action="retry-dashboard">Retry</button>
+        </div>`;
+      return;
+    }
+    renderDashboard(res.roadmaps);
+  }
+
+  function describeActivity(iso) {
+    if (!iso) return "Not started yet";
+    const days = daysBetween(new Date(iso), new Date());
+    if (days <= 0) return "Last activity today";
+    if (days === 1) return "Last activity yesterday";
+    return "Last activity " + days + " days ago";
+  }
+
+  function renderDashboard(roadmaps) {
+    const cards = roadmaps.map((r) => `
+      <article class="roadmap-card">
+        <div>
+          <h3>${esc(r.name)}</h3>
+          ${r.description ? `<p class="roadmap-card-desc">${esc(r.description)}</p>` : ""}
+          <p class="roadmap-card-meta">${esc(describeActivity(r.lastActivityAt))}</p>
+        </div>
+        <div class="roadmap-card-actions">
+          <button type="button" class="btn btn-primary btn-open" data-action="open-roadmap" data-id="${r.id}">Open</button>
+          <button type="button" class="btn btn-ghost-danger" data-action="delete-roadmap" data-id="${r.id}"
+                  aria-label="Delete ${esc(r.name)}">Delete</button>
+        </div>
+      </article>`);
+
+    // Offer the starter roadmap back whenever the account no longer has it.
+    const restore = roadmaps.some((r) => r.source === "builtin_ai_engineer") ? "" : `
+      <button type="button" class="roadmap-card action" data-action="restore-builtin">
+        <span class="action-title">↺ Restore AI Engineer Roadmap</span>
+        <span class="action-desc">Bring back the 10-month starter roadmap with fresh progress.</span>
+      </button>`;
+
+    $("dashboardContent").innerHTML = `
+      <h2>Your roadmaps</h2>
+      <p class="dashboard-lead">${roadmaps.length
+        ? "Pick up where you left off."
+        : "You don't have any roadmaps yet."}</p>
+      <div class="roadmap-grid">
+        ${cards.join("")}
+        ${restore}
+        <button type="button" class="roadmap-card action" data-action="create-roadmap">
+          <span class="action-title">+ Create new roadmap</span>
+          <span class="action-desc">Build your own plan: months, sections, topics and tasks.</span>
+        </button>
+        <button type="button" class="roadmap-card action" disabled>
+          <span class="action-title">✦ Create roadmap with AI <span class="coming-soon-badge">Coming soon</span></span>
+          <span class="action-desc">Describe a goal and let AI draft the plan.</span>
+        </button>
+      </div>`;
+    dashboardRoadmaps = roadmaps;
+  }
+
+  async function restoreBuiltinRoadmap() {
+    try {
+      await window.RoadmapApi.restoreBuiltin();
+      toast("AI Engineer Roadmap restored.", "success");
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      if (e.status !== 409) { toast("Couldn't restore the roadmap: " + e.message, "error"); return; }
+    }
+    showDashboard();
+  }
+
+  function openCreateRoadmapModal() {
+    const host = $("modalHost");
+    const thisMonth = currentMonthKey();
+    host.querySelector(".modal").innerHTML = `
+      <h2>Create a new roadmap</h2>
+      <form id="createRoadmapForm" novalidate>
+        <div class="field">
+          <label for="newRoadmapName">Roadmap name</label>
+          <input type="text" id="newRoadmapName" maxlength="80" autocomplete="off" placeholder="e.g. Learn Rust in 12 weeks" />
+        </div>
+        <div class="field">
+          <label for="newRoadmapDesc">Description (optional)</label>
+          <textarea id="newRoadmapDesc" maxlength="300" placeholder="What is this plan for?"></textarea>
+        </div>
+        <div class="field">
+          <label for="newRoadmapStart">Month 1 starts in</label>
+          <input type="month" id="newRoadmapStart" value="${esc(thisMonth)}" min="${esc(thisMonth)}" />
+        </div>
+        <p style="font-size:12px; color:var(--text-faint); margin:0 0 4px;">
+          Next you'll add months, sections, topics and tasks — laid out like the AI Engineer roadmap.
+        </p>
+        <p id="createRoadmapError" class="auth-error" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-action="close-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="createRoadmapSubmit">Create roadmap</button>
+        </div>
+      </form>`;
+    host.classList.remove("hidden");
+    $("newRoadmapName").focus();
+  }
+
+  async function submitCreateRoadmap() {
+    const error = $("createRoadmapError");
+    const name = $("newRoadmapName").value.trim();
+    const startMonth = $("newRoadmapStart").value;
+    error.textContent = "";
+    if (!name) { error.textContent = "Give your roadmap a name."; $("newRoadmapName").focus(); return; }
+    if (startMonth && startMonth < currentMonthKey()) {
+      error.textContent = "Start month can't be before the current month.";
+      return;
+    }
+    const submit = $("createRoadmapSubmit");
+    submit.disabled = true;
+    try {
+      const res = await window.RoadmapApi.create({
+        name,
+        description: $("newRoadmapDesc").value.trim(),
+        startMonth: startMonth || undefined,
+      });
+      closeModal();
+      openRoadmap(res.roadmap.id);
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      error.textContent = e.message;
+      submit.disabled = false;
+    }
+  }
+
+  function confirmDeleteRoadmap(id) {
+    const roadmap = dashboardRoadmaps.find((r) => String(r.id) === String(id));
+    if (!roadmap) return;
+    const host = $("modalHost");
+    host.querySelector(".modal").innerHTML = `
+      <h2>Delete “${esc(roadmap.name)}”?</h2>
+      <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+        This permanently deletes the roadmap and all of its progress — statuses, notes, links, due dates
+        and anything you added. This can't be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn" data-action="close-modal">Cancel</button>
+        <button class="btn btn-danger" data-action="confirm-delete-roadmap" data-id="${roadmap.id}">Delete roadmap</button>
+      </div>`;
+    host.classList.remove("hidden");
+  }
+
+  async function deleteRoadmap(id) {
+    closeModal();
+    try {
+      await window.RoadmapApi.remove(id);
+      toast("Roadmap deleted.", "success");
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      if (e.status !== 404) { toast("Couldn't delete the roadmap: " + e.message, "error"); return; }
+    }
+    showDashboard();
+  }
+
+  async function openRoadmap(id) {
+    hideDashboard();
+    showBlock("Loading roadmap…", "");
+    let res;
+    try {
+      res = await window.RoadmapApi.getProgress(id);
     } catch (e) {
       if (e.status === 401) { showAuth("login"); return; }
       // Never fall through to an empty editable state: saving it would overwrite real data.
-      showBlock("Couldn't load your data", e.message, [["Retry", () => loadUserData(username)], ["Log out", logout]]);
+      showBlock("Couldn't load this roadmap", e.message, [
+        ["Retry", () => openRoadmap(id)],
+        ["Back to roadmaps", () => { hideAuth(); showDashboard(); }],
+      ]);
       return;
     }
-    clearTimeout(session.timer);
-    Object.assign(session, { username, version: res.version || 0, dirty: false, saving: false,
-      conflict: false, conflictServer: null, retries: 0, expiredFor: null });
+    resetRoadmapSession(res.roadmap.id, res.version || 0);
+    DATA = res.roadmap.source === "builtin_ai_engineer" ? BUILTIN_DATA : BLANK_DATA;
     progress = normalizeProgress(res.data);
+    resetViewState();
     rebuildIndex();
+    syncTabs();
     hideAuth();
     unlockApp();
-    $("userName").textContent = username;
-    $("userChip").title = "Signed in as " + username;
-    ["userChip", "logoutBtn"].forEach((id) => $(id).classList.remove("hidden"));
+    $("roadmapTitle").textContent = res.roadmap.name;
+    $("roadmapSubtitle").textContent = res.roadmap.description;
+    document.title = res.roadmap.name + " — Roadmap Tracker";
+    state.search = "";
+    $("panelSearch").value = "";
     setSaveStatus("saved");
-    rerender();
+    setView("overview");
     checkMilestones();
-    if (res.data === null && readLegacyLocalData()) openLegacyModal(false);
+    if (res.data === null && res.roadmap.source === "builtin_ai_engineer" && readLegacyLocalData()) {
+      openLegacyModal(false);
+    }
+  }
+
+  // Per-roadmap UI state must not leak from one roadmap into the next.
+  function resetViewState() {
+    kanbanState.phase = null;
+    checklistFilters.status = "all";
+    checklistFilters.phase = "all";
+    [expandedPhases, sectionOpenState].forEach((m) => Object.keys(m).forEach((k) => delete m[k]));
+  }
+
+  // Skills and Reference only exist for roadmaps whose curriculum provides them.
+  function syncTabs() {
+    const available = { mastery: DATA.masteryChecklist.length > 0, reference: DATA.reference.length > 0 };
+    document.querySelectorAll(".tab").forEach((t) => {
+      if (t.dataset.view in available) t.classList.toggle("hidden", !available[t.dataset.view]);
+    });
+  }
+
+  // Flush pending edits before leaving the open roadmap; false if the user chose to stay.
+  async function settleUnsavedChanges(verb) {
+    if (session.username && session.roadmapId != null && (session.dirty || session.saving)) {
+      await flushNow();
+      if (session.dirty && !window.confirm(`Some changes haven't been saved yet. ${verb} anyway and lose them?`)) return false;
+    }
+    return true;
+  }
+
+  async function backToDashboard() {
+    if (!(await settleUnsavedChanges("Leave"))) return;
+    resetRoadmapSession(null, 0);
+    progress = normalizeProgress(null);
+    closeModal();
+    showDashboard();
+  }
+
+  function onDashboardClick(e) {
+    const el = e.target.closest("[data-action]");
+    if (!el) return;
+    switch (el.dataset.action) {
+      case "open-roadmap": openRoadmap(Number(el.dataset.id)); break;
+      case "delete-roadmap": confirmDeleteRoadmap(el.dataset.id); break;
+      case "restore-builtin": restoreBuiltinRoadmap(); break;
+      case "create-roadmap": openCreateRoadmapModal(); break;
+      case "retry-dashboard": showDashboard(); break;
+      default: break;
+    }
   }
 
   function handleSessionExpired() {
+    const hadRoadmap = session.roadmapId != null;
     clearTimeout(session.timer);
     session.expiredFor = session.username;
     session.username = null;
     setSaveStatus("idle");
     closeModal();
     showAuth("login",
-      "Your session expired, so your latest changes couldn't be saved. Log in again to keep working. " +
-      "If you made changes you want to keep, download them first.",
-      { offerDownload: true });
+      hadRoadmap
+        ? "Your session expired, so your latest changes couldn't be saved. Log in again to keep working. " +
+          "If you made changes you want to keep, download them first."
+        : "Your session expired. Log in again to continue.",
+      { offerDownload: hadRoadmap });
   }
 
   async function logout() {
-    if (session.username && (session.dirty || session.saving)) {
-      await flushNow();
-      if (session.dirty && !window.confirm("Some changes haven't been saved yet. Log out anyway and lose them?")) return;
-    }
-    try { await window.Api.logout(); } catch (e) { /* cookie may already be gone */ }
+    if (!(await settleUnsavedChanges("Log out"))) return;
+    try { await window.AuthApi.logout(); } catch (e) { /* cookie may already be gone */ }
     // A full reload drops every piece of in-memory, user-specific state.
     window.location.reload();
   }
@@ -1921,13 +2259,60 @@
     toast("Imported your local data — saving to your account…", "success");
   }
 
+  function debounce(fn, delay) {
+    let t;
+    return function (...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
+  }
+
   function wireSyncEvents() {
     $("authForm").addEventListener("submit", submitAuth);
     $("authToggle").addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
     $("authDownload").addEventListener("click", exportProgress);
+
+    // Live username availability check (register mode only)
+    $("authUsername").addEventListener("input", debounce(async () => {
+      if (authMode !== "register") return;
+      const val = $("authUsername").value.trim();
+      const el = $("authUsernameStatus");
+      if (val.length < 3 || !/^[A-Za-z0-9_-]{1,32}$/.test(val)) {
+        el.textContent = "";
+        el.className = "auth-field-hint";
+        return;
+      }
+      el.textContent = "Checking…";
+      el.className = "auth-field-hint checking";
+      try {
+        const r = await window.AuthApi.checkUsername(val);
+        if ($("authUsername").value.trim() !== val) return; // stale
+        el.textContent = r.available ? "✓ Available" : "✗ Already taken";
+        el.className = "auth-field-hint " + (r.available ? "available" : "taken");
+      } catch { el.textContent = ""; el.className = "auth-field-hint"; }
+    }, 400));
+
+    // Live password match indicator
+    function updatePasswordMatch() {
+      if (authMode !== "register") return;
+      const pw  = $("authPassword").value;
+      const cpw = $("authConfirmPassword").value;
+      const el  = $("authPasswordMatch");
+      if (!pw || !cpw) { el.textContent = ""; el.className = "auth-field-hint"; return; }
+      const match = pw === cpw;
+      el.textContent = match ? "✓ Passwords match" : "✗ Passwords do not match";
+      el.className = "auth-field-hint " + (match ? "match" : "mismatch");
+    }
+    $("authPassword").addEventListener("input", updatePasswordMatch);
+    $("authConfirmPassword").addEventListener("input", updatePasswordMatch);
     $("logoutBtn").addEventListener("click", logout);
-    $("saveStatus").addEventListener("click", () => {
-      const kind = $("saveStatus").dataset.kind;
+    $("dashboardLogoutBtn").addEventListener("click", logout);
+    $("backToDashboardBtn").addEventListener("click", backToDashboard);
+    $("dashboardContent").addEventListener("click", onDashboardClick);
+    $("modalHost").addEventListener("submit", (e) => {
+      if (e.target.id !== "createRoadmapForm") return;
+      e.preventDefault();
+      submitCreateRoadmap();
+    });
+    $("panelSaveStatus").addEventListener("click", () => {
+      const kind = $("panelSaveStatus").dataset.kind;
       if (kind === "error") { session.retries = 0; flushSave(); }
       if (kind === "conflict") openConflictModal();
     });
@@ -1950,6 +2335,8 @@
       document.getElementById("main").innerHTML = emptyState("Could not load roadmap data (data/roadmap.js missing).");
       return;
     }
+    const footerYear = document.getElementById("authFooterYear");
+    if (footerYear) footerYear.textContent = new Date().getFullYear();
     initTheme();
     wireEvents();
     wireSyncEvents();

@@ -7,6 +7,7 @@
 "use strict";
 
 const USERNAME_RE = /^[A-Za-z0-9_-]{3,32}$/;
+const NAME_RE = /^[A-Za-zÀ-ÿ' -]{1,64}$/;
 const MIN_PASSWORD = 8;
 /** bcrypt silently ignores anything past 72 bytes. */
 const MAX_PASSWORD_BYTES = 72;
@@ -14,6 +15,19 @@ const MAX_PASSWORD_BYTES = 72;
 /**
  * @typedef {{ valid: true } | { valid: false, error: string }} ValidationResult
  */
+
+/**
+ * Validate a first or last name.
+ * @param {unknown} value
+ * @param {string} field - Display label used in the error message.
+ * @returns {ValidationResult}
+ */
+function validateName(value, field) {
+  if (typeof value !== "string" || !NAME_RE.test(value.trim())) {
+    return { valid: false, error: `${field} must be 1–64 letters.` };
+  }
+  return { valid: true };
+}
 
 /**
  * Validate a registration username against the allowed character set and length.
@@ -42,4 +56,4 @@ function validatePassword(password) {
   return { valid: true };
 }
 
-module.exports = { validateUsername, validatePassword, MIN_PASSWORD, MAX_PASSWORD_BYTES };
+module.exports = { validateName, validateUsername, validatePassword, MIN_PASSWORD, MAX_PASSWORD_BYTES };

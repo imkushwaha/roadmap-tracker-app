@@ -6,7 +6,7 @@
 |-------|-----------|---------|------------|
 | **Runtime** | Node.js | ≥ 22 | Built-in `node:test` module; modern ESM; stable LTS |
 | **Web framework** | Express | 5.x | Minimal, well-understood; v5 is async-error-friendly |
-| **Database** | SQLite (`better-sqlite3`) | — | Zero infrastructure; single-file; sync API fits Express well |
+| **Database** | Turso (hosted libSQL) via `@libsql/client` | — | SQLite-compatible SQL; data persists across redeploys on ephemeral hosts (Render) with no paid disk; async API fits Express 5 |
 | **Auth** | `jsonwebtoken` + `bcryptjs` | — | Industry-standard JWT + constant-time password hashing |
 | **Security** | `helmet` + `express-rate-limit` | — | CSP headers + brute-force protection out of the box |
 | **Frontend** | Vanilla JS (ES2022), HTML5, CSS3 | — | No build step; loads instantly; anyone can contribute |
@@ -23,12 +23,13 @@
 ```
 roadmap-dashboard/
 ├── css/            ← All styles in one file (styles.css)
-├── data/           ← Static roadmap content + SQLite file (git-ignored)
+├── data/           ← Static roadmap content (+ local dev SQLite file, git-ignored)
 ├── js/             ← Frontend scripts loaded by index.html
 ├── scripts/        ← Developer tooling (Python parser — not a runtime dep)
 ├── server/         ← All backend code
 │   ├── auth/       ← Auth-specific helpers (pure functions, no routes)
-│   └── routes/     ← Express routers (auth + data)
+│   ├── roadmaps/   ← Roadmap domain: builtin identity, create-input validators, empty progress, repository (all roadmap SQL)
+│   └── routes/     ← Express routers (auth + roadmaps)
 └── test/           ← All tests + helpers
 ```
 
@@ -36,12 +37,12 @@ roadmap-dashboard/
 
 - `snake_case` for Python scripts
 - `camelCase.js` for Node.js modules
-- Routers named by resource: `auth.js`, `data.js`
+- Routers named by resource: `auth.js`, `roadmaps.js`
 - Helpers named by concern: `service.js`, `validators.js`
 
 ### Module Exports
 
-- Server modules use CommonJS (`require`/`module.exports`) — consistent with `better-sqlite3` and `jsonwebtoken`
+- Server modules use CommonJS (`require`/`module.exports`) — consistent with `@libsql/client` and `jsonwebtoken`
 - Frontend JS is plain script files (no `import`/`export`) loaded via `<script>` tags in order
 - `js/progress-schema.js` uses a UMD wrapper to work in both environments
 
@@ -70,7 +71,8 @@ cp .env.example .env
 # 3. Start server
 npm start
 # Server starts on http://localhost:3000
-# SQLite DB created at data/app.db on first start
+# With TURSO_DATABASE_URL unset, a local SQLite DB is created at data/app.db on first start.
+# To develop against Turso instead, set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in .env.
 
 # 4. Run tests
 npm test
@@ -81,7 +83,8 @@ npm test
 | Variable | Dev Default | Prod Required | Description |
 |----------|-------------|---------------|-------------|
 | `SESSION_SECRET` | random (auto-generated) | Yes (≥ 32 chars) | JWT signing key |
-| `DB_PATH` | `./data/app.db` | No | SQLite file path; `:memory:` for tests |
+| `TURSO_DATABASE_URL` | local file `./data/app.db` | **Yes** | Turso `libsql://…` URL (`turso db show <name> --url`); tests use `:memory:` |
+| `TURSO_AUTH_TOKEN` | empty | Yes, for a remote `libsql://` URL | Turso auth token (`turso db tokens create <name>`); keep secret |
 | `PORT` | `3000` | No | HTTP listen port |
 | `NODE_ENV` | — | `production` | Enables production safety checks |
 | `TRUST_PROXY` | `false` | No | Number of reverse-proxy hops (for rate-limit real-IP) |
@@ -116,15 +119,18 @@ This overwrites `data/roadmap.json` and `data/roadmap.js`. Commit both generated
 
 ### Rate Limiting
 
-- Global: 10 requests per 15-minute window per IP.
-- Login sub-limit: tracks failed attempts specifically to slow brute-force attacks.
+- `register` and `login`: 10 requests per 15-minute window per IP; only failed logins count toward the login limit, to slow brute-force attacks.
+- `check-username`: a looser 30 per window.
+- `/api/roadmaps` routes require a session and are not separately rate-limited.
 - `TRUST_PROXY` config correctly extracts client IP when behind a reverse proxy.
 
 ### Input Validation
 
-- `validateUsername` / `validatePassword` validate auth inputs before any DB touch.
-- `validateProgress` (shared UMD) validates the full `ProgressStore` shape before every `PUT /api/data` write. Invalid data is rejected with a descriptive 400 before it can reach SQLite.
-- Body size limit of **5 MB** on `PUT /api/data` prevents DoS via large payloads.
+- `validateName` / `validateUsername` / `validatePassword` validate auth inputs before any DB touch.
+- `validateProgress` (shared UMD) validates the full `ProgressStore` shape before every `PUT /api/roadmaps/:id/progress` write. Invalid data is rejected with a descriptive 400 before it can reach the database.
+- `validateRoadmapInput` (`server/roadmaps/validators.js`) validates `POST /api/roadmaps` before any DB touch: name 1–80 characters on a single line, optional description up to 300, optional `YYYY-MM` start month; unknown `source` values are rejected. An account is capped at 20 roadmaps. Roadmap names and descriptions are stored verbatim and always escaped when rendered in the browser.
+- Roadmap ids are parsed strictly (`/^d+$/`); a malformed id is a 404, and every roadmap query is scoped by the session user, so another user's roadmap is indistinguishable from a missing one.
+- Body size limit of **5 MB** on `PUT /api/roadmaps/:id/progress` prevents DoS via large payloads.
 
 ### File Serving Allowlist
 
@@ -142,7 +148,7 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 
 ### Optimistic Concurrency Control
 
-`PUT /api/data` runs in an `IMMEDIATE` SQLite transaction that atomically reads and conditionally updates the `version` column. If the client's version doesn't match the server's (e.g. another browser tab saved first), the transaction aborts and returns 409. This prevents silent data loss without needing pessimistic locking.
+`PUT /api/roadmaps/:id/progress` performs a single-statement compare-and-swap per roadmap: `UPDATE roadmap_progress … WHERE roadmap_id = ? AND version = ?` (or `INSERT … ON CONFLICT DO NOTHING` for a first save). The write only lands if the stored `version` still matches the client's; otherwise zero rows are affected and the route re-reads the server copy and returns 409 (e.g. another browser tab saved first). This prevents silent data loss without pessimistic locking or a multi-statement transaction (one network round trip to Turso).
 
 ### Autosave Resilience
 
@@ -153,9 +159,10 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 
 ### Database
 
-- **WAL mode** allows reads to proceed concurrently with a write (relevant if multiple request handlers query SQLite at the same time).
-- **Foreign keys enabled** ensures `user_data.user_id` always references a real `users.id`.
-- **`ON DELETE CASCADE`** means deleting a user cleans up their data row atomically.
+- **Durable hosted storage**: data lives in Turso, not on the web server's disk, so redeploys and restarts on Render do not wipe users or progress.
+- **Foreign keys enforced** (libSQL default; verified by the cascade test) ensures `roadmaps.user_id` always references a real `users.id` and `roadmap_progress.roadmap_id` a real `roadmaps.id`.
+- **`ON DELETE CASCADE`** means deleting a roadmap removes its progress row, and deleting a user removes their roadmaps and progress, atomically.
+- **Atomic registration**: the user row and the starter roadmap are inserted in one `db.batch` transaction, so a failed or duplicate registration leaves no orphan rows.
 
 ---
 
@@ -163,7 +170,7 @@ All other paths return 404 — `data/app.db`, `.env`, `server/`, `node_modules/`
 
 ### Philosophy
 
-Tests are **integration-first**: most of the test suite exercises real HTTP requests against a real Express app backed by an in-memory SQLite database. This catches the full request → middleware → route → DB → response cycle without mocking.
+Tests are **integration-first**: most of the test suite exercises real HTTP requests against a real Express app backed by an in-memory libSQL database (`:memory:`, no Turso credentials needed). This catches the full request → middleware → route → DB → response cycle without mocking.
 
 Unit tests target the two pure, stateless modules: `loadConfig` and `validateProgress`.
 
@@ -171,7 +178,8 @@ Unit tests target the two pure, stateless modules: `loadConfig` and `validatePro
 
 ```
 test/helpers.js     — shared: startServer(), client (cookie-jar fetch), fixtures
-test/api.test.js    — HTTP integration (auth flow, data CRUD, conflict, isolation, security)
+test/api.test.js    — HTTP integration (auth flow, progress save/load, conflict, isolation, security)
+test/roadmaps.test.js — roadmap list/create/restore/delete, custom-roadmap validation and limits, ownership, atomic registration
 test/config.test.js — loadConfig() unit tests
 test/schema.test.js — validateProgress() unit tests
 ```
@@ -181,9 +189,12 @@ test/schema.test.js — validateProgress() unit tests
 | Scenario | What It Verifies |
 |----------|-----------------|
 | Register → login → me → logout | Full auth lifecycle |
-| PUT then GET | Data round-trips correctly |
+| PUT then GET `/api/roadmaps/:id/progress` | Progress round-trips correctly |
+| Delete a roadmap, restore the built-in one | Cascade removes progress; restore starts fresh and is allowed once |
+| Create a custom roadmap (with and without a start month) | 201; trimmed name; start month seeded as progress version 1 and saveable; no progress row otherwise |
+| Invalid create input, markup in a name, the 20-roadmap cap | 400 / stored verbatim / 409, and deleting frees a slot |
 | Two-tab conflict (PUT twice with same version) | 409 returned with server's copy |
-| User A cannot read User B's data | Per-user isolation |
+| User A cannot read, write or delete User B's roadmap | Per-user isolation (404) |
 | GET `/data/app.db` returns 404 | File serving allowlist |
 | GET `/css/styles.css` returns 200 | Static files work |
 | Rapid login attempts | Rate limiting kicks in |
@@ -203,7 +214,8 @@ npm test
 
 ### Server-Side
 
-- **No ORM**: raw SQL via `better-sqlite3`'s prepared statements. Prepared statements prevent SQL injection; synchronous API keeps code simple.
+- **No ORM**: raw SQL via `@libsql/client`'s `db.execute({ sql, args })`. Parameterised `args` prevent SQL injection; the API is async, so route handlers `await` queries (Express 5 forwards rejected promises to the error handler).
+- **Repository for roadmap data**: the roadmaps router is HTTP-only; all roadmap and progress SQL lives in `server/roadmaps/repository.js` (`createRoadmapRepository(db)`), where every lookup is scoped by `user_id` and multi-statement writes (roadmap + first progress row) use one `db.batch` transaction.
 - **No global state**: `db` and `sessionSecret` flow through `createApp` and into route handlers via closure — no module-level singletons.
 - **Explicit error handling**: every route has a try/catch that returns a structured `{ error }` JSON response.
 
@@ -219,10 +231,11 @@ npm test
 
 | Limitation | Impact | Possible Improvement |
 |------------|--------|----------------------|
-| SQLite (single writer) | Negligible at single-user scale; write lock blocks concurrent writes | Migrate to PostgreSQL for multi-user teams |
+| Turso free tier + network hop | Each query is a network round trip; depends on an external service and its credentials; free-tier usage limits apply (ample for ~10–20 users) | Co-locate the Render region with the Turso region; move to a paid Turso plan or PostgreSQL if usage grows |
 | JWT in cookie (no blacklist) | Logout clears cookie but issued token remains valid until expiry if intercepted | Add a token revocation table or use short-lived tokens |
-| No pagination on data read | `user_data.data` JSON blob grows with roadmap size | Already bounded by 5 MB limit; current roadmap is well under |
-| `js/app.js` is a monolith (~1961 lines) | Harder to navigate; no tree-shaking | Split into view modules (refactor plan drafted in `.claude/code-refactor-plan.md`) |
+| No pagination on data read | `roadmap_progress.data` JSON blob grows with roadmap size | Already bounded by 5 MB limit; current roadmap is well under |
+| `js/app.js` is a monolith (~2.2k lines) | Harder to navigate; no tree-shaking | Split into view modules (refactor plan drafted in `.claude/code-refactor-plan.md`) |
 | Python parser as manual step | Roadmap content updates require a developer with Python | Could become a CI step or a small Node script |
 | No HTTPS in development | Cookies with `Secure` flag off | Use `mkcert` or a local reverse proxy for HTTPS dev |
 | Single user per account | No team/shared progress | Would require multi-tenancy or shared roadmap features |
+| Custom roadmaps are built in place, with limited metadata editing | A custom roadmap starts empty and is built with the Month → Section → Topic → Tasks editors (stored in `progress.custom`); its name/description cannot be edited afterwards, dashboard cards show no completion %, and it has no Skills Checklist / Reference. "Create with AI" is a disabled *Coming soon* placeholder | Rename/edit details and a stats endpoint (Phase 3); optionally a creation wizard or templates; AI generation later |
