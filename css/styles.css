@@ -594,3 +594,12 @@ button.roadmap-card.action:hover { border-color: var(--accent); background: var(
   .dashboard-bar-inner { padding: 12px 14px; }
   .dashboard-content { padding: 20px 14px 50px; }
 }
+
+/* ---------------- Custom roadmaps ---------------- */
+.field input[type="month"] {
+  width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg-sunken); color: var(--text); font-size: 13px;
+}
+.blank-roadmap { max-width: 640px; }
+.blank-roadmap p { font-size: 13.5px; color: var(--text-muted); line-height: 1.5; }
+.blank-roadmap ol { margin: 0 0 12px; padding-left: 20px; font-size: 13.5px; line-height: 1.7; }

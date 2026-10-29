@@ -2,7 +2,18 @@
 
 **Session:** from-ai-roadmap-to-generic-roadmap  
 **Date:** 2026-10-29  
-**Status:** Planning — not yet started
+**Status:** Phase 1 done · Phase 2 done (**built differently from this plan — see the note below**) · Phase 3 not started
+
+> **Phase 2 deviation (read this first).** Sections 4.4, 6.5, 6.6, 7 and 8 and the original Phase 2 list below
+> describe a separate up-front roadmap builder, a `roadmaps.definition` column, a
+> `RoadmapDefinition` schema validator and `js/roadmap-builder.js`. **None of that was built.** While
+> implementing, it turned out the app already had complete in-roadmap editors (add/delete month →
+> section → topic → tasks) storing user content in `progress.custom`. A custom roadmap is therefore an
+> **empty curriculum** (`BLANK_DATA`) whose whole structure lives in `progress.custom`, built with those
+> existing editors. Reasons: reuses proven UI and storage; editing after creation comes for free; no
+> schema change; no orphaned progress keys; plan and progress save and conflict-resolve together. See
+> "Phase 2 — as built" below and `documentation/multi-roadmap.md`. A creation wizard that pre-fills
+> `progress.custom`, templates, or a stored definition remain options for a later phase.
 
 ---
 
@@ -432,7 +443,10 @@ app.use("/api/roadmaps", createRoadmapsRouter({ db, requireAuth }));
 
 ## 9. Implementation Phases
 
-### Phase 1 — Infrastructure (backend + wiring, no custom creation yet)
+### Phase 1 — Infrastructure (backend + wiring, no custom creation yet) — ✅ DONE
+
+*(Checkboxes below were left as written; as built, the `/api/data` shim was dropped rather than kept, and
+the dashboard also offers "Restore AI Engineer Roadmap" via `POST /api/roadmaps { source }`.)*
 
 **Goal:** Users see a Roadmap Dashboard after login. They can open the AI Engineer Roadmap,
 which works exactly as before. They can delete roadmaps (with confirmation). No custom creation yet.
@@ -460,19 +474,41 @@ which works exactly as before. They can delete roadmaps (with confirmation). No 
 
 ---
 
-### Phase 2 — Custom Roadmap Creation
+### Phase 2 — Custom Roadmap Creation — ✅ DONE (as built, not as originally planned)
 
-**Goal:** Users can create a custom roadmap through a form/wizard. It is loadable and functions
+**Original goal:** Users can create a custom roadmap through a form/wizard. It is loadable and functions
 like the AI Engineer Roadmap.
 
-- [ ] `js/roadmap-definition-schema.js` — `validateRoadmapDefinition()`
-- [ ] `js/roadmap-builder.js` — creation form UI
-- [ ] `server/routes/roadmaps.js` — `POST /` with definition validation
-- [ ] `index.html` — add `<script src="js/roadmap-definition-schema.js">` and `roadmap-builder.js`
-- [ ] `js/app.js` — wire "New Roadmap" button to `RoadmapBuilder.open()`; handle custom definition
-  in `openRoadmap()` (set `DATA = progressRes.definition`)
-- [ ] `js/api.js` — `RoadmapApi.create(body)`
-- [ ] CSS — roadmap builder modal styles
+**Original task list — superseded, not built:**
+
+- ~~`js/roadmap-definition-schema.js` — `validateRoadmapDefinition()`~~
+- ~~`js/roadmap-builder.js` — creation form UI~~
+- ~~`index.html` — add `<script src="js/roadmap-definition-schema.js">` and `roadmap-builder.js`~~
+- ~~`js/app.js` — wire "New Roadmap" button to `RoadmapBuilder.open()`; `DATA = progressRes.definition`~~
+- ~~CSS — roadmap builder modal styles~~
+
+#### Phase 2 — as built
+
+A custom roadmap = `BLANK_DATA` (no phases, counters, skills checklist or reference) + the user's
+`progress.custom`, edited with the existing Month → Section (week or theme) → Topic → Tasks editors.
+
+**Backend**
+- [x] `server/roadmaps/repository.js` — `createRoadmapRepository(db)`: all roadmap/progress SQL moved out of the router
+- [x] `server/roadmaps/validators.js` — `validateRoadmapInput` (name 1–80 single line, description ≤ 300, optional `YYYY-MM` start month), `CUSTOM_SOURCE`, `MAX_ROADMAPS_PER_USER` = 20
+- [x] `server/roadmaps/progress.js` — `emptyProgress(startMonth)`
+- [x] `server/routes/roadmaps.js` — HTTP-only; `POST /` now has two modes: create custom (`source` omitted/`"custom"`; 201, 400, 409 at the cap) and restore built-in (`source: "builtin_ai_engineer"`; 201/409); unknown `source` → 400. A start month seeds a `roadmap_progress` row at version 1 in the same transaction
+- [x] No schema change, no migration
+
+**Frontend**
+- [x] `js/api.js` — `RoadmapApi.create(body)`
+- [x] `js/app.js` — `BUILTIN_DATA` / `BLANK_DATA` and `let DATA` set in `openRoadmap` by `source`; create dialog (`openCreateRoadmapModal`, `submitCreateRoadmap`); `resetViewState()`, `syncTabs()` (hides Skills Checklist and Reference), `renderBlankRoadmap()` onboarding card; empty-state handling in Timeline/Kanban/Checklist; Kanban no longer assumes `DATA.phases[0]`; `horizonEnd()` clamps to ≥ 1 month; start-month dialog wording adapts to custom roadmaps
+- [x] `css/styles.css` — month input styling, blank-roadmap card
+
+**Tests**
+- [x] `test/roadmaps.test.js` — "custom roadmaps" block (create, start-month seeding, per-roadmap content isolation, validation, markup stored verbatim, 20-roadmap cap, cross-user access, delete); 59 tests total
+
+**Docs**
+- [x] README, `documentation/*.md` (incl. `multi-roadmap.md`) and `.claude/PROJECT_WALKTHROUGH.md` updated
 
 ---
 
@@ -601,8 +637,10 @@ In Phase 3, add a `GET /api/roadmaps/:id/stats` endpoint that returns a lightwei
    Not in Phase 1. Add `PUT /api/roadmaps/:id` (name + description only) in Phase 3.
 
 2. **Can users edit a custom roadmap's structure after creation (add/remove phases)?**  
-   Not in Phase 1 or 2. The builder creates the structure once. Editing existing definitions is
-   Phase 3+ (requires handling orphaned ProgressStore keys).
+   **Yes (resolved in Phase 2).** Because the structure lives in `progress.custom` and is edited with the
+   existing add/delete editors for months, sections, topics and tasks, it is editable at any time; deleting
+   an item also removes its saved progress, so nothing is orphaned. (Renaming or editing an existing item's
+   title is not offered yet, and neither is renaming the roadmap itself — Phase 3.)
 
 3. **Should roadmap cards show a progress percentage?**  
    No in Phase 1. Requires extra progress fetches. Add in Phase 3 with a stats endpoint.

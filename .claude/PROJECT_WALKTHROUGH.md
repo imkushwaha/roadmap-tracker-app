@@ -2,8 +2,10 @@
 
 **Session context:** Written before the refactor from a single hardcoded "AI Engineer Roadmap" to a
 generic multi-roadmap tracker, and updated after **Phase 1** (multi-roadmap infrastructure: roadmap
-dashboard, per-roadmap progress, open/delete/restore). Still to come: Phase 2 (custom roadmap
-builder) and Phase 3 (polish, "Create with AI"). See `.claude/specs/generic-tracker-plan.md`.
+dashboard, per-roadmap progress, open/delete/restore) and **Phase 2** (custom roadmaps: create an empty
+roadmap and build it in place). Still to come: Phase 3 (polish, "Create with AI"). See
+`.claude/specs/generic-tracker-plan.md` — note Phase 2 was built differently from that plan (no separate
+builder or stored definition; see section 5, "Custom roadmaps").
 
 ---
 
@@ -12,8 +14,10 @@ builder) and Phase 3 (polish, "Create with AI"). See `.claude/specs/generic-trac
 A **multi-user, multi-roadmap progress tracker** (branded "Roadmap Tracker"). After login a user
 lands on a **roadmap dashboard** listing their roadmaps; every account starts with the built-in
 10-month AI Engineer roadmap (Oct 2026 → Jul 2027), which can be opened, deleted (with confirmation)
-and restored. Opening a roadmap shows the familiar views, and progress is stored server-side **per
-roadmap**, tied to the authenticated account. Creating custom roadmaps is shown as "Coming soon".
+and restored. Users can also **create custom roadmaps** (name, description, start month; up to 20 per
+account) that start empty and are built in place with the Month → Section → Topic → Tasks editors.
+Opening a roadmap shows the familiar views, and progress is stored server-side **per roadmap**, tied to
+the authenticated account. "Create with AI" is shown as "Coming soon".
 
 **Key characteristics:**
 - Zero-build frontend: plain HTML + CSS + vanilla ES2022 JS, no bundler, no framework
@@ -52,17 +56,20 @@ roadmap-dashboard/
 │   │   ├── service.js          Pure helpers: bcrypt, JWT, cookie options, requireAuth MW
 │   │   └── validators.js       validateUsername / validatePassword / validateName
 │   ├── roadmaps/
-│   │   └── builtin.js          BUILTIN_AI_ENGINEER (source, name, description of the starter roadmap)
+│   │   ├── builtin.js          BUILTIN_AI_ENGINEER (source, name, description of the starter roadmap)
+│   │   ├── validators.js       validateRoadmapInput + CUSTOM_SOURCE, name/description/20-roadmap limits
+│   │   ├── progress.js         emptyProgress(startMonth) — starting blob of a new custom roadmap
+│   │   └── repository.js       createRoadmapRepository(db) — all roadmap + progress SQL
 │   └── routes/
 │       ├── auth.js             /api/auth/* (register, login, logout, me, check-username)
-│       └── roadmaps.js         /api/roadmaps: list, restore, delete, GET|PUT /:id/progress (CAS)
+│       └── roadmaps.js         /api/roadmaps (HTTP only): list, create, restore, delete, GET|PUT /:id/progress
 │
 ├── scripts/
 │   └── md_to_json.py           Python 3 parser: roadmap.md → roadmap.json + roadmap.js
 │
 ├── test/
 │   ├── api.test.js             Integration tests (auth flow, progress CRUD, concurrency, isolation)
-│   ├── roadmaps.test.js        Roadmap list/restore/delete, ownership, atomic register, migration
+│   ├── roadmaps.test.js        Roadmap list/create/restore/delete, custom-roadmap validation + cap, ownership, atomic register, migration
 │   ├── config.test.js          Unit tests for loadConfig()
 │   ├── schema.test.js          Unit tests for validateProgress()
 │   └── helpers.js              Test harness: startServer(), client(), creds(), sampleData
@@ -72,6 +79,7 @@ roadmap-dashboard/
 │   ├── low-level-design.md     Detailed module breakdown
 │   ├── api-design.md           Full REST API reference
 │   ├── database-design.md      Schema, ER diagram, query patterns, security notes
+│   ├── multi-roadmap.md        Multi-roadmap + custom-roadmap feature guide
 │   └── engineering-foundations.md  Coding patterns and conventions
 │
 ├── .claude/
@@ -138,6 +146,8 @@ roadmaps          id(PK) | user_id(FK→users.id CASCADE, indexed) | name | desc
 roadmap_progress  roadmap_id(PK, FK→roadmaps.id CASCADE) | data(JSON text) | version(INT) | updated_at
 ```
 `source = "builtin_ai_engineer"` rows are metadata only — the curriculum is the static `data/roadmap.js`.
+`source = "custom"` rows are user-built roadmaps with **no stored curriculum or definition column**: their
+months, sections, topics and tasks live in the roadmap's progress blob under `custom`.
 
 **Legacy migration:** if a `user_data` table exists (the old one-roadmap-per-user schema), one
 transaction gives every user the built-in roadmap, copies each `user_data` row into
@@ -188,11 +198,23 @@ Login uses `dummyHash` when the username is not found to ensure identical respon
 `BUILTIN_AI_ENGINEER` — the frozen `{ source, name, description }` of the starter roadmap, shared by
 registration, the legacy migration and the restore endpoint.
 
+### `server/roadmaps/validators.js`, `progress.js`, `repository.js`
+- `validateRoadmapInput(body)` → `{ valid, value: { name, description, startMonth } }` or `{ valid: false, error }`:
+  name required, trimmed, 1–80 chars on a single line; description optional, ≤ 300; `startMonth` optional `YYYY-MM`.
+  Also exports `CUSTOM_SOURCE` (`"custom"`), `NAME_MAX`, `DESCRIPTION_MAX`, `MAX_ROADMAPS_PER_USER` (20).
+- `emptyProgress(startMonth)` — a valid empty `ProgressStore` (`settings.startMonth` set when given).
+- `createRoadmapRepository(db)` — `listForUser`, `findOwned`, `countForUser`, `hasSource`, `insert` (roadmap, plus an
+  optional first progress row at version 1, in one `db.batch`), `remove`, `getProgress`, `saveProgress` (the
+  compare-and-swap). Every lookup that starts from a request is scoped by `user_id`.
+
 ### `server/routes/roadmaps.js`
-`router.use(requireAuth)`; every query is scoped to `req.user.id` (`WHERE id = ? AND user_id = ?`), and a
-malformed, unknown or foreign `:id` is a 404.
+HTTP only — it parses/validates and delegates all SQL to the repository. `router.use(requireAuth)`; every
+query is scoped to `req.user.id`, and a malformed, unknown or foreign `:id` is a 404.
 - `GET /api/roadmaps` — the user's roadmaps with `lastActivityAt` (the progress row's `updated_at`, or `null`)
-- `POST /api/roadmaps` — only `{ source: "builtin_ai_engineer" }` is accepted (restore): 201, 409 if the user already has it, 400 otherwise
+- `POST /api/roadmaps` — two modes. **Custom** (`source` omitted or `"custom"`): `{ name, description?, startMonth? }` →
+  201 `{ roadmap }`; with a `startMonth` the first progress row (empty progress + `settings.startMonth`, version 1) is
+  written in the same transaction; 400 on invalid input; 409 at the 20-roadmap cap. **Restore**
+  (`source: "builtin_ai_engineer"`) → 201, or 409 if the user already has it. Any other `source` → 400.
 - `DELETE /api/roadmaps/:id` — 204; `roadmap_progress` cascades
 - `GET /api/roadmaps/:id/progress` — `{ roadmap, data, version, updatedAt }` or `{ roadmap, data: null, version: 0 }`
 - `PUT /api/roadmaps/:id/progress` — validates via `validateProgress`, then a **compare-and-swap**:
@@ -242,7 +264,8 @@ Thin wrappers around `fetch`. Single `call(method, path, body)` helper normalise
 Exports:
 - `AuthApi.me()`, `.login()`, `.register(firstName, lastName, username, password)`,
   `.checkUsername(username)`, `.logout()`
-- `RoadmapApi.list()`, `.restoreBuiltin()`, `.remove(id)`, `.getProgress(id)`, `.putProgress(id, data, version)`
+- `RoadmapApi.list()`, `.create({ name, description?, startMonth? })`, `.restoreBuiltin()`, `.remove(id)`,
+  `.getProgress(id)`, `.putProgress(id, data, version)`
 - There is no combined `window.Api` shim any more; `app.js` calls `AuthApi` / `RoadmapApi` directly
 
 ### `js/app.js` — the SPA (~2.2k lines, single IIFE)
@@ -254,10 +277,21 @@ All application logic in one file. Key sections:
 `backToDashboard()`, which first flushes unsaved edits (`settleUnsavedChanges`, shared with `logout()`).
 
 **Roadmap dashboard** — `#dashboardScreen` in `index.html`: one card per roadmap (name, description,
-last activity, **Open** / **Delete**), a "Restore AI Engineer Roadmap" card when the account has none, and
-disabled "Create new roadmap" / "Create roadmap with AI" cards marked *Coming soon*. One delegated click
-handler (`onDashboardClick`). **Delete** opens the shared modal (`confirmDeleteRoadmap`) and only the
-modal's "Delete roadmap" button calls `RoadmapApi.remove`.
+last activity, **Open** / **Delete**), a "Restore AI Engineer Roadmap" card when the account has none, an
+enabled "Create new roadmap" card, and a disabled "Create roadmap with AI" card marked *Coming soon*. One
+delegated click handler (`onDashboardClick`). **Delete** opens the shared modal (`confirmDeleteRoadmap`) and
+only the modal's "Delete roadmap" button calls `RoadmapApi.remove`. **Create** opens a modal form
+(`openCreateRoadmapModal`: name, description, start month); `submitCreateRoadmap` calls `RoadmapApi.create`
+and then `openRoadmap(newId)`.
+
+**Custom roadmaps** — `BUILTIN_DATA` is `window.ROADMAP_DATA`; `BLANK_DATA` is a frozen empty curriculum
+(no phases, counters, skills checklist or reference). `DATA` is a `let` that `openRoadmap` sets from the
+roadmap's `source` (`builtin_ai_engineer` → `BUILTIN_DATA`, anything else → `BLANK_DATA`). A custom roadmap's
+whole structure is therefore `progress.custom`, edited with the existing Month → Section (week or theme) →
+Topic → Tasks editors (add and delete at every level). `openRoadmap` also calls `resetViewState()` (Kanban
+month, Checklist filters, expanded months/sections) and `syncTabs()` (hides **Skills Checklist** and
+**Reference** when the curriculum has none). With no months, Overview shows an onboarding card
+(`renderBlankRoadmap`, "Add your first month"); Timeline, Kanban and Checklist show empty-state text.
 
 **Progress store** — in-memory `progress` object. Every mutation calls `persist()` which debounces
 a server save. `normalizeProgress(parsed)` ensures the store always has all required keys.
@@ -290,7 +324,8 @@ theme toggle (light/dark), start-month setting, export/import JSON, legacy local
 reset, logout.
 
 **Custom content** — users can add custom topics (attached to a section) and custom phases
-(months 11+). These are stored in `progress.custom` and merged into `ALL_PHASES` / `INDEX` on
+(numbered after the curriculum's own months: Month 11+ on the AI Engineer roadmap, Month 1+ on a
+custom roadmap). These are stored in `progress.custom` and merged into `ALL_PHASES` / `INDEX` on
 rebuild so they appear in every view.
 
 ---
@@ -360,12 +395,12 @@ Version 0 means "no row yet" — triggers `INSERT ... ON CONFLICT DO NOTHING` (s
 
 ## 10. Testing
 
-Tests run with Node's built-in test runner: `npm test` → `node --test "test/*.test.js"`.
+Tests run with Node's built-in test runner: `npm test` → `node --test "test/*.test.js"` (59 tests).
 
 | File | What it tests |
 |---|---|
 | `test/api.test.js` | Full integration: auth flow, progress CRUD via `/api/roadmaps/:id/progress`, optimistic concurrency, cross-user isolation, cascade delete |
-| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (404s), atomic registration, one-time `user_data` migration |
+| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (404s), atomic registration, one-time `user_data` migration, and custom roadmaps (create, start-month seeding at version 1, input validation, markup stored verbatim, the 20-roadmap cap, cross-user access, progress removed on delete) |
 | `test/config.test.js` | `loadConfig()` validation, error cases, env var parsing |
 | `test/schema.test.js` | `validateProgress()` acceptance and rejection cases |
 | `test/helpers.js` | `startServer()` (in-memory DB, ephemeral port), HTTP `client()` with cookie jar, `creds()` (includes first/last name), `dp(client)` (progress path of the first roadmap), `sampleData()` |
@@ -383,13 +418,13 @@ Tests run with Node's built-in test runner: `npm test` → `node --test "test/*.
 
 No persistent disk needed — all data lives in Turso.
 
-**Phase 1 rollout:** on first boot the new code migrates `user_data` → `roadmaps` + `roadmap_progress` and renames the old table to `user_data_legacy`. Stop any older instance before the new one boots, since the old code can no longer find `user_data`.
+**Phase 1 rollout:** on first boot the new code migrates `user_data` → `roadmaps` + `roadmap_progress` and renames the old table to `user_data_legacy`. Stop any older instance before the new one boots, since the old code can no longer find `user_data`. **Phase 2** needs no schema change or migration.
 
 ---
 
 ## 12. Hardcoded "AI Engineer" References (Refactor Status)
 
-Status after **Phase 1** (multi-roadmap infrastructure):
+Status after **Phase 2** (custom roadmaps):
 
 | Location | Hardcoded content | Status |
 |---|---|---|
@@ -399,12 +434,12 @@ Status after **Phase 1** (multi-roadmap infrastructure):
 | `index.html` footer | "AI Engineer Roadmap. All rights reserved." in `.auth-footer-copy` | **Done** — now "Roadmap Tracker. All rights reserved." |
 | `server/roadmaps/builtin.js` | Name/description of the starter roadmap | By design — the only place the built-in roadmap's identity lives |
 | `data/roadmap.md` | The entire 10-month AI Engineer curriculum content | Unchanged — still the built-in roadmap's content |
-| `data/roadmap.js` | Generated from roadmap.md; contains `window.ROADMAP_DATA` | Unchanged — `const DATA = window.ROADMAP_DATA` in `js/app.js` is still static; Phase 2 must make it per-roadmap |
+| `data/roadmap.js` | Generated from roadmap.md; contains `window.ROADMAP_DATA` | Unchanged content. **Done** in Phase 2 — it is now `BUILTIN_DATA`; `let DATA` in `js/app.js` is set per opened roadmap (`BUILTIN_DATA` or the empty `BLANK_DATA`) |
 | `package.json` `.description` | "AI Engineer roadmap progress dashboard…" | Not yet changed |
 | `js/app.js` `STORAGE_KEY` | `"roadmap-dashboard:progress:v1"` (generic, OK) | No change needed; legacy browser-data import is offered only for the built-in roadmap |
-| `documentation/` | Docs describe the single-roadmap app | **Done** for Phase 1 — API, database, HLD, LLD and engineering-foundations now describe roadmaps, `roadmap_progress` and the dashboard flow |
+| `documentation/` | Docs describe the single-roadmap app | **Done** for Phases 1–2 — API, database, HLD, LLD, engineering-foundations and `multi-roadmap.md` describe roadmaps, custom roadmaps, `roadmap_progress` and the dashboard flow |
 
-Still hardcoded in views (Phase 2 targets): `DATA.counters`, `DATA.masteryChecklist`, `DATA.reference` and `DATA.meta.horizonStart` are read directly, so a custom roadmap without them would need those tabs/fields guarded.
+Views that read curriculum fields directly (`DATA.counters`, `DATA.masteryChecklist`, `DATA.reference`, `DATA.meta.horizonStart`) are now safe for a custom roadmap: `BLANK_DATA` supplies empty values, `syncTabs()` hides the Skills Checklist and Reference tabs, the counters block is omitted when empty, and the default start month falls back to the current month.
 
 The roadmap data itself (`window.ROADMAP_DATA`) is consumed generically by `app.js` — the
 phase/section/topic/subtask structure is data-driven. The views don't know the content is about AI.

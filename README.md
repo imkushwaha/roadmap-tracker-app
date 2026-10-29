@@ -38,7 +38,9 @@ A single-page web application for tracking progress through structured roadmaps.
 - Every account is seeded with the **AI Engineer Roadmap**; **Open** it to use the views below, with a back arrow to return to the dashboard
 - **Delete** a roadmap (and its progress) — always behind a confirmation dialog
 - **Restore** the AI Engineer Roadmap (fresh progress) if you deleted it
-- **Create new roadmap** and **Create roadmap with AI** are shown as *Coming soon*
+- **Create new roadmap** — give it a name, an optional description and the month Month 1 starts in; it opens as an empty roadmap that you build with the in-roadmap editors (Month → Section, a week or a theme → Topic → Tasks). An empty roadmap shows an onboarding card with an **Add your first month** button
+- Up to **20 roadmaps** per account
+- **Create roadmap with AI** is shown as *Coming soon*
 
 Views inside a roadmap:
 
@@ -49,11 +51,11 @@ Views inside a roadmap:
 | **Kanban** | Per-month drag-and-drop board across To Do / In Progress / Blocked / Done |
 | **Checklist** | Full flat task list with status/phase filters, search, and a per-task details modal (notes, link, due date) |
 | **This Week** | Active tasks for the current week, overdue tasks, and tasks due in the next 7 days |
-| **Skills Checklist** | Flat mastery checklist trackable independently of the calendar |
-| **Reference** | All strategic/background roadmap content, searchable |
+| **Skills Checklist** | Flat mastery checklist trackable independently of the calendar (AI Engineer roadmap only — hidden on custom roadmaps) |
+| **Reference** | All strategic/background roadmap content, searchable (AI Engineer roadmap only — hidden on custom roadmaps) |
 
 Additional capabilities:
-- **Custom content** — add topics to any week, or add entirely new months with their own sections and topics; custom items appear everywhere built-in items do
+- **Custom content** — add topics to any week, or add entirely new months with their own sections and topics; custom items appear everywhere built-in items do. A custom roadmap is made entirely of this content
 - **Autosave** with optimistic-concurrency conflict detection (multi-device support)
 - **Export / Import** progress as JSON
 - **Dark mode**, search, and a reset with confirmation
@@ -137,7 +139,7 @@ Open http://localhost:3000, choose **Create an account**, and start tracking. Ex
 npm test
 ```
 
-All 51 tests cover auth flows, roadmap list/delete/restore, per-roadmap progress save/load, conflict detection, cross-user isolation, the `user_data` migration, rate limiting, schema validation, and static-file security.
+All 59 tests cover auth flows, roadmap list/create/delete/restore, custom-roadmap input validation and the 20-roadmap cap, per-roadmap progress save/load, conflict detection, cross-user isolation, the `user_data` migration, rate limiting, schema validation, and static-file security.
 
 ### Regenerate Roadmap Data
 
@@ -173,10 +175,13 @@ roadmap-dashboard/
 │   │   ├── service.js            Pure auth helpers: bcrypt, JWT, cookie options
 │   │   └── validators.js         Input validators: username, password, name
 │   ├── roadmaps/
-│   │   └── builtin.js            Identity of the built-in AI Engineer roadmap
+│   │   ├── builtin.js            Identity of the built-in AI Engineer roadmap
+│   │   ├── repository.js         All roadmap + progress SQL (user-scoped queries, atomic CAS save)
+│   │   ├── validators.js         Create-roadmap input rules and limits (name, description, start month, cap)
+│   │   └── progress.js           Empty progress blob for a newly created roadmap
 │   └── routes/
 │       ├── auth.js               Router: /api/auth/register|login|logout|me|check-username
-│       └── roadmaps.js           Router: /api/roadmaps — list, restore, delete, progress GET|PUT (atomic CAS)
+│       └── roadmaps.js           Thin HTTP layer: /api/roadmaps — list, create/restore, delete, progress GET|PUT
 │
 ├── scripts/
 │   └── md_to_json.py             Markdown → JSON/JS pipeline (RoadmapParser class)
@@ -184,7 +189,7 @@ roadmap-dashboard/
 ├── test/
 │   ├── helpers.js                Server bootstrap, cookie-jar client, fixtures
 │   ├── api.test.js               Integration tests: auth, progress, conflicts, isolation
-│   ├── roadmaps.test.js          Roadmap list/delete/restore, ownership, user_data migration
+│   ├── roadmaps.test.js          Roadmap list/create/delete/restore, validation, cap, ownership, user_data migration
 │   ├── config.test.js            Unit tests for config loader
 │   └── schema.test.js            Unit tests for progress-schema validator
 │
@@ -246,7 +251,12 @@ graph LR
             val["auth/validators.js\nUsername · Password · Name"]
         end
 
-        builtin["roadmaps/builtin.js\nStarter roadmap identity"]
+        subgraph RoadmapLayer["Roadmap layer"]
+            builtin["roadmaps/builtin.js\nStarter roadmap identity"]
+            repo["roadmaps/repository.js\nRoadmap + progress SQL"]
+            rval["roadmaps/validators.js\nCreate input · limits"]
+            rprog["roadmaps/progress.js\nEmpty progress blob"]
+        end
 
         subgraph Routers["Routers"]
             authR["routes/auth.js\n/api/auth/*"]
@@ -274,6 +284,10 @@ graph LR
     roadmapsR --> svc
     roadmapsR --> schsrv
     roadmapsR --> builtin
+    roadmapsR --> repo
+    roadmapsR --> rval
+    roadmapsR --> rprog
+    repo --> dbmod
     dbmod --> builtin
     dbmod --> Turso
 ```
@@ -293,6 +307,9 @@ graph TD
     svc["auth/service.js"]
     val["auth/validators.js"]
     builtin["roadmaps/builtin.js"]
+    repo["roadmaps/repository.js"]
+    rval["roadmaps/validators.js"]
+    rprog["roadmaps/progress.js"]
     schema["js/progress-schema.js"]
 
     idx --> cfg
@@ -306,16 +323,22 @@ graph TD
     authR --> builtin
     roadmapsR --> schema
     roadmapsR --> builtin
+    roadmapsR --> repo
+    roadmapsR --> rval
+    roadmapsR --> rprog
     dbmod --> builtin
 
     style svc fill:#d4edda
     style val fill:#d4edda
+    style repo fill:#d4edda
+    style rval fill:#d4edda
+    style rprog fill:#d4edda
     style authR fill:#cce5ff
     style roadmapsR fill:#cce5ff
     style appfact fill:#fff3cd
 ```
 
-> Green = auth layer (no Express dependency), Blue = routers, Yellow = app compositor.
+> Green = auth and roadmap layers (no Express dependency), Blue = routers, Yellow = app compositor.
 
 ---
 
@@ -336,7 +359,7 @@ erDiagram
         integer user_id      FK  "→ users.id CASCADE DELETE (indexed)"
         text    name
         text    description
-        text    source           "builtin_ai_engineer"
+        text    source           "builtin_ai_engineer | custom"
         text    created_at       "ISO-8601 UTC"
     }
     ROADMAP_PROGRESS {
@@ -553,12 +576,15 @@ All require a session (`401` otherwise). A roadmap id that doesn't exist, is mal
 | Method | Path | Request body | Response |
 |---|---|---|---|
 | `GET` | `/api/roadmaps` | — | `200 {roadmaps: [{id, name, description, source, createdAt, lastActivityAt}]}` — `lastActivityAt` is `null` until the first save |
-| `POST` | `/api/roadmaps` | `{source: "builtin_ai_engineer"}` | `201 {roadmap}` (restore the starter roadmap) · `400` any other source · `409` you already have it |
+| `POST` | `/api/roadmaps` | **Create:** `{name, description?, startMonth?}` | `201 {roadmap}` with `source: "custom"` · `400` invalid input or unknown `source` · `409` at the 20-roadmap cap |
+| `POST` | `/api/roadmaps` | **Restore:** `{source: "builtin_ai_engineer"}` | `201 {roadmap}` (starter roadmap, fresh progress) · `409` you already have it |
 | `DELETE` | `/api/roadmaps/:id` | — | `204` (progress cascades) · `404` |
 | `GET` | `/api/roadmaps/:id/progress` | — | `200 {roadmap, data, version, updatedAt}` · `{roadmap, data:null, version:0}` before the first save · `404` |
 | `PUT` | `/api/roadmaps/:id/progress` | `{data, version}` | `200 {version, updatedAt}` · `400` schema error · `404` · `409` version conflict · `413` body > 5 MB |
 
-The progress `PUT` uses **compare-and-swap** in a single atomic statement (`UPDATE … WHERE roadmap_id = ? AND version = ?`, or `INSERT … ON CONFLICT DO NOTHING` for a first save with `version: 0`). If no row changes because the server's current version differs from `version` in the request, the server row is read and a `409 {error, server: {data, version, updatedAt}}` is returned so the client can resolve the conflict. Creating custom roadmaps is not available yet (Coming soon).
+The progress `PUT` uses **compare-and-swap** in a single atomic statement (`UPDATE … WHERE roadmap_id = ? AND version = ?`, or `INSERT … ON CONFLICT DO NOTHING` for a first save with `version: 0`). If no row changes because the server's current version differs from `version` in the request, the server row is read and a `409 {error, server: {data, version, updatedAt}}` is returned so the client can resolve the conflict.
+
+**Create rules:** `name` is required, 1–80 characters on a single line (trimmed); `description` is optional, up to 300 characters; `startMonth` is optional, `"YYYY-MM"`. With a `startMonth`, a progress row is seeded at `version: 1` (`settings.startMonth` set, nothing else); without one the roadmap has no progress row (`version: 0`) and the client defaults Month 1 to the current month. Names and descriptions are stored verbatim and always escaped when rendered.
 
 ### Static files served
 
@@ -615,6 +641,8 @@ Progress (Turso roadmap_progress.data — per-roadmap, server-persisted)
     └─ phases[]    { id, title, objective, sections[] }
 ```
 
+A **custom roadmap has no static curriculum**: its `roadmaps` row has `source = 'custom'` and every month, section, topic and task lives in that roadmap's `progress.custom` — the same structure the AI Engineer roadmap uses for user-added content. No schema change was needed; `source` is `builtin_ai_engineer` or `custom`. The in-memory curriculum for a custom roadmap is empty (no phases, counters, skills checklist or reference), which is why those tabs are hidden for it.
+
 See `data/schema.md` for the complete shape with all fields.
 
 ---
@@ -630,7 +658,7 @@ The test suite uses Node's built-in `node:test` runner — no Jest, no Mocha. Ea
 | Test file | Coverage |
 |---|---|
 | `test/api.test.js` | Auth flows, progress round-trips, version conflicts, cross-user isolation, rate limiting, static-file security |
-| `test/roadmaps.test.js` | Starter roadmap seeding, list/delete/restore, ownership (404s), atomic registration, one-time `user_data` migration |
+| `test/roadmaps.test.js` | Starter roadmap seeding, list/create/delete/restore, custom-roadmap validation, 20-roadmap cap, markup in names, ownership (404s), atomic registration, one-time `user_data` migration |
 | `test/config.test.js` | Config loader — env vars, production guards, defaults |
 | `test/schema.test.js` | Progress schema validator — valid/invalid shapes, `__proto__` injection, custom months |
 
@@ -749,7 +777,10 @@ The codebase follows **SOLID** principles throughout:
 | `auth/service.js` | bcrypt and JWT operations — no Express |
 | `auth/validators.js` | Input validation rules — no DB access |
 | `routes/auth.js` | HTTP auth route handlers |
-| `routes/roadmaps.js` | HTTP roadmap + progress route handlers |
+| `routes/roadmaps.js` | HTTP roadmap + progress route handlers — no SQL |
+| `roadmaps/repository.js` | All roadmap and progress SQL, scoped by user id |
+| `roadmaps/validators.js` | Create-roadmap input rules and limits |
+| `roadmaps/progress.js` | Empty progress blob for a new roadmap |
 | `roadmaps/builtin.js` | Identity of the built-in starter roadmap |
 | `server/app.js` | Compose middleware and routers — no business logic |
 | `server/config.js` | Parse and validate environment variables |
@@ -766,11 +797,12 @@ The codebase follows **SOLID** principles throughout:
 
 - `auth/service.js` wraps `bcryptjs` and `jsonwebtoken` so route handlers (`routes/auth.js`) depend on the wrapper, not the library.
 - `createRoadmapsRouter` receives `requireAuth` as a parameter rather than importing it directly, making it testable with a substitute middleware.
+- `createRoadmapRepository(db)` keeps SQL out of route handlers: the router depends on the repository's methods, not on `@libsql/client` statements.
 - `RoadmapParser` accepts `list[str]` (lines) rather than a file path, separating I/O (`load_lines`) from parsing.
 
 ### Interface Segregation
 
-- `js/api.js` exposes `AuthApi` (me, login, register, checkUsername, logout) and `RoadmapApi` (list, restoreBuiltin, remove, getProgress, putProgress) as separate objects. Client code that only needs roadmap sync does not depend on the auth surface.
+- `js/api.js` exposes `AuthApi` (me, login, register, checkUsername, logout) and `RoadmapApi` (list, create, restoreBuiltin, remove, getProgress, putProgress) as separate objects. Client code that only needs roadmap sync does not depend on the auth surface.
 
 ---
 

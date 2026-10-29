@@ -28,7 +28,7 @@ roadmap-dashboard/
 ├── scripts/        ← Developer tooling (Python parser — not a runtime dep)
 ├── server/         ← All backend code
 │   ├── auth/       ← Auth-specific helpers (pure functions, no routes)
-│   ├── roadmaps/   ← Built-in roadmap identity (BUILTIN_AI_ENGINEER)
+│   ├── roadmaps/   ← Roadmap domain: builtin identity, create-input validators, empty progress, repository (all roadmap SQL)
 │   └── routes/     ← Express routers (auth + roadmaps)
 └── test/           ← All tests + helpers
 ```
@@ -128,6 +128,7 @@ This overwrites `data/roadmap.json` and `data/roadmap.js`. Commit both generated
 
 - `validateName` / `validateUsername` / `validatePassword` validate auth inputs before any DB touch.
 - `validateProgress` (shared UMD) validates the full `ProgressStore` shape before every `PUT /api/roadmaps/:id/progress` write. Invalid data is rejected with a descriptive 400 before it can reach the database.
+- `validateRoadmapInput` (`server/roadmaps/validators.js`) validates `POST /api/roadmaps` before any DB touch: name 1–80 characters on a single line, optional description up to 300, optional `YYYY-MM` start month; unknown `source` values are rejected. An account is capped at 20 roadmaps. Roadmap names and descriptions are stored verbatim and always escaped when rendered in the browser.
 - Roadmap ids are parsed strictly (`/^d+$/`); a malformed id is a 404, and every roadmap query is scoped by the session user, so another user's roadmap is indistinguishable from a missing one.
 - Body size limit of **5 MB** on `PUT /api/roadmaps/:id/progress` prevents DoS via large payloads.
 
@@ -179,7 +180,7 @@ Unit tests target the two pure, stateless modules: `loadConfig` and `validatePro
 ```
 test/helpers.js     — shared: startServer(), client (cookie-jar fetch), fixtures
 test/api.test.js    — HTTP integration (auth flow, progress save/load, conflict, isolation, security)
-test/roadmaps.test.js — roadmap list/restore/delete, ownership, atomic registration, legacy migration
+test/roadmaps.test.js — roadmap list/create/restore/delete, custom-roadmap validation and limits, ownership, atomic registration, legacy migration
 test/config.test.js — loadConfig() unit tests
 test/schema.test.js — validateProgress() unit tests
 ```
@@ -191,6 +192,8 @@ test/schema.test.js — validateProgress() unit tests
 | Register → login → me → logout | Full auth lifecycle |
 | PUT then GET `/api/roadmaps/:id/progress` | Progress round-trips correctly |
 | Delete a roadmap, restore the built-in one | Cascade removes progress; restore starts fresh and is allowed once |
+| Create a custom roadmap (with and without a start month) | 201; trimmed name; start month seeded as progress version 1 and saveable; no progress row otherwise |
+| Invalid create input, markup in a name, the 20-roadmap cap | 400 / stored verbatim / 409, and deleting frees a slot |
 | Boot a database that has `user_data` | Progress and version copied once; old table renamed; deleted roadmaps not re-seeded |
 | Two-tab conflict (PUT twice with same version) | 409 returned with server's copy |
 | User A cannot read, write or delete User B's roadmap | Per-user isolation (404) |
@@ -214,6 +217,7 @@ npm test
 ### Server-Side
 
 - **No ORM**: raw SQL via `@libsql/client`'s `db.execute({ sql, args })`. Parameterised `args` prevent SQL injection; the API is async, so route handlers `await` queries (Express 5 forwards rejected promises to the error handler).
+- **Repository for roadmap data**: the roadmaps router is HTTP-only; all roadmap and progress SQL lives in `server/roadmaps/repository.js` (`createRoadmapRepository(db)`), where every lookup is scoped by `user_id` and multi-statement writes (roadmap + first progress row) use one `db.batch` transaction.
 - **No global state**: `db` and `sessionSecret` flow through `createApp` and into route handlers via closure — no module-level singletons.
 - **Explicit error handling**: every route has a try/catch that returns a structured `{ error }` JSON response.
 
@@ -236,4 +240,4 @@ npm test
 | Python parser as manual step | Roadmap content updates require a developer with Python | Could become a CI step or a small Node script |
 | No HTTPS in development | Cookies with `Secure` flag off | Use `mkcert` or a local reverse proxy for HTTPS dev |
 | Single user per account | No team/shared progress | Would require multi-tenancy or shared roadmap features |
-| Custom roadmaps not yet creatable | The dashboard lists roadmaps but only the built-in AI Engineer one exists; "Create new roadmap" and "Create with AI" are disabled placeholders | Planned for later phases (roadmap builder, then AI generation) |
+| Custom roadmaps are built in place, with limited metadata editing | A custom roadmap starts empty and is built with the Month → Section → Topic → Tasks editors (stored in `progress.custom`); its name/description cannot be edited afterwards, dashboard cards show no completion %, and it has no Skills Checklist / Reference. "Create with AI" is a disabled *Coming soon* placeholder | Rename/edit details and a stats endpoint (Phase 3); optionally a creation wizard or templates; AI generation later |

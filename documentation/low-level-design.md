@@ -26,14 +26,17 @@ roadmap-dashboard/
 │   │   ├── service.js             ← Pure auth helpers
 │   │   └── validators.js          ← Input validation
 │   ├── roadmaps/
-│   │   └── builtin.js             ← BUILTIN_AI_ENGINEER identity constant
+│   │   ├── builtin.js             ← BUILTIN_AI_ENGINEER identity constant
+│   │   ├── validators.js          ← validateRoadmapInput, CUSTOM_SOURCE, limits
+│   │   ├── progress.js            ← emptyProgress(startMonth)
+│   │   └── repository.js          ← createRoadmapRepository(db): all roadmap SQL
 │   └── routes/
 │       ├── auth.js                ← /api/auth/* handlers
 │       └── roadmaps.js            ← /api/roadmaps/* handlers
 └── test/
     ├── helpers.js                 ← startServer, client, creds, dp, fixtures
     ├── api.test.js                ← Integration tests (auth, progress, conflicts, isolation)
-    ├── roadmaps.test.js           ← Roadmap list/delete/restore, ownership, migration
+    ├── roadmaps.test.js           ← Roadmap list/create/delete/restore, ownership, limits, migration
     ├── config.test.js             ← Config unit tests
     └── schema.test.js             ← Schema validator unit tests
 ```
@@ -223,43 +226,80 @@ Shared by registration (`routes/auth.js`), the legacy migration (`db.js`) and th
 
 ---
 
-### 2.9 `server/routes/roadmaps.js` — Roadmaps Router
+### 2.9 Roadmap support modules — `server/roadmaps/`
 
-**Export:** `createRoadmapsRouter({ db, requireAuth })` — an Express Router mounted at `/api/roadmaps`. `router.use(requireAuth)` guards every route.
+| Module | Exports | Role |
+|--------|---------|------|
+| `validators.js` | `validateRoadmapInput(body)`, `CUSTOM_SOURCE` (`"custom"`), `NAME_MAX` (80), `DESCRIPTION_MAX` (300), `MAX_ROADMAPS_PER_USER` (20) | Pure input rules for creating a custom roadmap. Returns `{ valid: true, value: { name, description, startMonth } }` (name and description trimmed, `startMonth` or `null`) or `{ valid: false, error }`. Rejects a missing/blank name, a name over 80 chars or containing control characters (e.g. a newline), a non-string description, a description over 300 chars, and a `startMonth` that is not `YYYY-MM` |
+| `progress.js` | `emptyProgress(startMonth)` | Builds `{ items: {}, counters: {}, celebratedPhases: [], settings: startMonth ? { startMonth } : {}, custom: { topics: [], phases: [] } }` — valid input for `validateProgress` |
+| `repository.js` | `createRoadmapRepository(db)` | All SQL for roadmaps and progress (below) |
 
-Internal helpers: `toRoadmap(row)` (maps a `roadmaps` row to `{ id, name, description, source, createdAt }`), `parseId(raw)` (positive integer or `null`), `findOwned(userId, roadmapId)` (`SELECT … FROM roadmaps WHERE id = ? AND user_id = ?`), `getProgressRow(roadmapId)` and `saveProgress(roadmapId, dataText, clientVersion)` (the compare-and-swap).
+`createRoadmapRepository(db)` returns:
+
+| Method | Statement(s) | Returns |
+|--------|--------------|---------|
+| `listForUser(userId)` | `SELECT r.id, r.name, r.description, r.source, r.created_at, p.updated_at AS last_activity_at FROM roadmaps r LEFT JOIN roadmap_progress p ON p.roadmap_id = r.id WHERE r.user_id = ? ORDER BY r.created_at, r.id` | `RoadmapRow[]`, each with `lastActivityAt: string \| null` |
+| `findOwned(userId, roadmapId)` | `SELECT … FROM roadmaps WHERE id = ? AND user_id = ?` | `RoadmapRow` or `undefined` |
+| `countForUser(userId)` | `SELECT COUNT(*) AS n FROM roadmaps WHERE user_id = ?` | number |
+| `hasSource(userId, source)` | `SELECT 1 FROM roadmaps WHERE user_id = ? AND source = ?` | boolean |
+| `insert(userId, { name, description, source }, initialProgress = null)` | One `db.batch`: `INSERT INTO roadmaps …`; when `initialProgress` is given, also `INSERT INTO roadmap_progress … VALUES (last_insert_rowid(), ?, 1, ?)` | new roadmap id |
+| `remove(userId, roadmapId)` | `DELETE FROM roadmaps WHERE id = ? AND user_id = ?` (progress cascades) | boolean (a row was deleted) |
+| `getProgress(roadmapId)` | `SELECT data, version, updated_at FROM roadmap_progress WHERE roadmap_id = ?` | `{ data, version, updated_at }` or `undefined` |
+| `saveProgress(roadmapId, dataText, clientVersion)` | Compare-and-swap, one statement: version 0 → `INSERT … ON CONFLICT(roadmap_id) DO NOTHING`; else `UPDATE … WHERE roadmap_id = ? AND version = ?` | `{ conflict: false, version, updatedAt }` or `{ conflict: true, row }` (row re-read) |
+
+---
+
+### 2.10 `server/routes/roadmaps.js` — Roadmaps Router
+
+**Export:** `createRoadmapsRouter({ db, requireAuth })` — an Express Router mounted at `/api/roadmaps`. `router.use(requireAuth)` guards every route. The router is **HTTP-only**: it parses ids and bodies, validates, picks status codes and delegates every query to `createRoadmapRepository(db)`.
+
+Internal helpers: `parseId(raw)` (digits-only string → number, else `null`) and `findOwnedFromParams(req)` (`parseId` + `repo.findOwned(req.user.id, id)`, so a malformed id and a foreign id both yield `undefined`).
 
 #### GET `/`
 
 ```
-1. SELECT r.id, r.name, r.description, r.source, r.created_at, p.updated_at AS last_activity_at
-   FROM roadmaps r LEFT JOIN roadmap_progress p ON p.roadmap_id = r.id
-   WHERE r.user_id = ? ORDER BY r.created_at, r.id
-2. 200 { roadmaps: [ { ...toRoadmap(row), lastActivityAt: string | null } ] }
+1. repo.listForUser(req.user.id)
+2. 200 { roadmaps: [ { id, name, description, source, createdAt, lastActivityAt } ] }
 ```
 
 #### POST `/`
 
+Dispatches on `req.body?.source`:
+
 ```
-1. body.source must equal BUILTIN_AI_ENGINEER.source → else 400 "Only the AI Engineer roadmap can be created right now."
-2. SELECT 1 FROM roadmaps WHERE user_id = ? AND source = ?   → 409 "You already have this roadmap." if found
-3. INSERT INTO roadmaps (user_id, name, description, source) VALUES (?, ?, ?, ?)
-4. 201 { roadmap: toRoadmap(findOwned(userId, lastInsertRowid)) }
+source === BUILTIN_AI_ENGINEER.source  → restoreBuiltin
+source !== undefined && source !== CUSTOM_SOURCE → 400 { error: "Unknown roadmap source." }
+otherwise (undefined or "custom")      → createCustom
+
+restoreBuiltin:
+  1. repo.hasSource(userId, "builtin_ai_engineer") → 409 "You already have this roadmap."
+  2. repo.insert(userId, BUILTIN_AI_ENGINEER)                       // no progress row: version 0
+  3. 201 { roadmap }
+
+createCustom:
+  1. validateRoadmapInput(req.body) → 400 { error } when invalid
+  2. repo.countForUser(userId) >= 20 → 409 "You can have at most 20 roadmaps."
+  3. progress = startMonth ? emptyProgress(startMonth) : null
+  4. repo.insert(userId, { name, description, source: "custom" }, progress)
+       // with a start month: roadmap + roadmap_progress(version 1) in one transaction
+  5. 201 { roadmap }
 ```
+
+Examples of bodies that return 400: `{}` and `{ "source": "custom" }` (no name), `{ "source": 5 }`, `{ "source": "enterprise", "name": "x" }`, a name over 80 chars or with a newline, `description` as a number, `startMonth` of `"October"` or `"2027-13"`.
 
 #### DELETE `/:id`
 
 ```
 1. id = parseId(req.params.id); a malformed id is treated as "not found"
-2. DELETE FROM roadmaps WHERE id = ? AND user_id = ?       // roadmap_progress cascades
-3. rowsAffected === 0 → 404 { error: 'Roadmap not found' }; otherwise 204
+2. repo.remove(userId, id)                                    // roadmap_progress cascades
+3. nothing removed → 404 { error: 'Roadmap not found' }; otherwise 204
 ```
 
 #### GET `/:id/progress`
 
 ```
-1. roadmap = await findOwned(req.user.id, id)  → 404 if none (unknown, foreign or malformed id)
-2. row = await getProgressRow(id)
+1. roadmap = await findOwnedFromParams(req)  → 404 if none (unknown, foreign or malformed id)
+2. row = await repo.getProgress(roadmap.id)
 3. No row → 200 { roadmap, data: null, version: 0 }
    Else   → 200 { roadmap, data: JSON.parse(row.data), version, updatedAt }
 ```
@@ -267,21 +307,13 @@ Internal helpers: `toRoadmap(row)` (maps a `roadmaps` row to `{ id, name, descri
 #### PUT `/:id/progress`
 
 ```
-1. roadmap = await findOwned(...)  → 404 (ownership is checked before the body)
+1. roadmap = await findOwnedFromParams(req)  → 404 (ownership is checked before the body)
 2. body.version must be a non-negative integer → 400 '"version" must be a non-negative integer.'
 3. validateProgress(body.data) → { ok, errors }
    If !ok → 400 { error: "Data doesn't match the progress schema.", details: errors }
-4. result = await saveProgress(id, JSON.stringify(body.data), body.version)   // single-statement compare-and-swap:
-
-     if body.version === 0:
-       INSERT INTO roadmap_progress (roadmap_id, data, version, updated_at) VALUES (?, ?, 1, ?)
-       ON CONFLICT(roadmap_id) DO NOTHING
-     else:
-       UPDATE roadmap_progress SET data = ?, version = version + 1, updated_at = ?
-        WHERE roadmap_id = ? AND version = ?
-
+4. result = await repo.saveProgress(roadmap.id, JSON.stringify(body.data), body.version)
      rowsAffected === 1 → { conflict: false, version: body.version + 1, updatedAt: now }
-     else               → { conflict: true, row: await getProgressRow(id) }
+     else               → { conflict: true, row: await getProgress(roadmap.id) }
 
 5. conflict → 409 { error: 'Version conflict',
                     server: row ? { data: JSON.parse(row.data), version, updatedAt } : { data: null, version: 0 } }
@@ -311,6 +343,7 @@ Uses the browser `fetch` API with `credentials: "same-origin"` (sends cookies au
 | Method | HTTP call | Returns |
 |--------|-----------|---------|
 | `list()` | `GET /api/roadmaps` | `{ roadmaps }` |
+| `create({ name, description?, startMonth? })` | `POST /api/roadmaps` | `{ roadmap }` (`source: "custom"`) or throws (400 validation, 409 at the 20-roadmap limit) |
 | `restoreBuiltin()` | `POST /api/roadmaps` with `{ source: "builtin_ai_engineer" }` | `{ roadmap }` |
 | `remove(id)` | `DELETE /api/roadmaps/:id` | `null` |
 | `getProgress(id)` | `GET /api/roadmaps/:id/progress` | `{ roadmap, data, version, updatedAt? }` |
@@ -351,8 +384,9 @@ Structured as a self-invoking function expression (IIFE) to avoid global namespa
 | `progress` | In-memory `ProgressStore` of the **open roadmap**; mutated by all user interactions (an empty store while on the dashboard) |
 | `session` | `{ username, firstName, lastName, roadmapId, version, dirty, saving, conflict, conflictServer, retries, timer, expiredFor }`. `roadmapId` is `null` on the dashboard; `persist()` and `flushSave()` do nothing unless both `username` and `roadmapId` are set |
 | `dashboardRoadmaps` | The roadmap list last rendered on the dashboard (used to look up a name for the delete confirmation) |
-| `DATA` | `window.ROADMAP_DATA` — the static AI Engineer curriculum (the only roadmap content today) |
-| `INDEX` | Flat array of all subtasks built from `DATA` plus the user's custom content, for fast search/filter |
+| `BUILTIN_DATA` / `BLANK_DATA` | `BUILTIN_DATA` is `window.ROADMAP_DATA`, the static AI Engineer curriculum. `BLANK_DATA` is a frozen empty curriculum `{ meta: { horizonStart: null }, phases: [], counters: [], masteryChecklist: [], reference: [] }` used for custom roadmaps |
+| `DATA` | `let` — the curriculum of the **open roadmap**: `BUILTIN_DATA` initially, then set by `openRoadmap` to `BUILTIN_DATA` for a `builtin_ai_engineer` roadmap and `BLANK_DATA` for any other source |
+| `INDEX` | Flat array of all subtasks built from `DATA` plus the roadmap's custom content (`progress.custom`), for fast search/filter |
 
 #### Screens and Navigation
 
@@ -362,11 +396,15 @@ Structured as a self-invoking function expression (IIFE) to avoid global namespa
 | `submitAuth()` | After a successful login/register calls `enterDashboard(res.user)` |
 | `enterDashboard(user)` | Stores the account fields, resets per-roadmap sync state via `resetRoadmapSession(null, 0)`, clears `progress`, fills the profile name fields, hides the auth screen and calls `showDashboard()` |
 | `showDashboard()` | Locks the roadmap UI, shows `#dashboardScreen`, calls `RoadmapApi.list()`, then `renderDashboard()`; a 401 goes to `handleSessionExpired()`, other errors render a Retry state |
-| `renderDashboard(roadmaps)` | Renders one card per roadmap (name, description, last activity, **Open** / **Delete**), a "Restore AI Engineer Roadmap" card when the account has no `builtin_ai_engineer` roadmap, and disabled "Create new roadmap" / "Create roadmap with AI" cards marked *Coming soon* |
-| `onDashboardClick(e)` | One delegated handler on `#dashboardContent` for `open-roadmap`, `delete-roadmap`, `restore-builtin`, `retry-dashboard` |
+| `renderDashboard(roadmaps)` | Renders one card per roadmap (name, description, last activity, **Open** / **Delete**), a "Restore AI Engineer Roadmap" card when the account has no `builtin_ai_engineer` roadmap, an enabled "Create new roadmap" card (`create-roadmap`), and a disabled "Create roadmap with AI" card marked *Coming soon*. Names and descriptions are inserted through `esc()` |
+| `onDashboardClick(e)` | One delegated handler on `#dashboardContent` for `open-roadmap`, `delete-roadmap`, `restore-builtin`, `create-roadmap`, `retry-dashboard` |
+| `openCreateRoadmapModal()` | Opens the shared modal with a `<form id="createRoadmapForm">`: name (max 80), description (max 300), and a `type="month"` start month defaulting to, and not earlier than, the current month; Cancel is `type="button"` so only Enter / "Create roadmap" submits |
+| `submitCreateRoadmap()` | Called from a delegated `submit` listener on `#modalHost`. Checks a name is present and the start month is not in the past (inline error in `#createRoadmapError`), disables the submit button, calls `RoadmapApi.create`, closes the modal and calls `openRoadmap(newId)`. A 401 goes to `handleSessionExpired()`; any other error is shown inline and the button is re-enabled |
 | `confirmDeleteRoadmap(id)` | Opens the shared modal asking for confirmation (names the roadmap, warns it is permanent); the modal's `confirm-delete-roadmap` action calls `deleteRoadmap(id)` → `RoadmapApi.remove` → refresh |
 | `restoreBuiltinRoadmap()` | `RoadmapApi.restoreBuiltin()`, then refreshes; a 409 ("already have it") just refreshes |
-| `openRoadmap(id)` | Shows a loading block, `RoadmapApi.getProgress(id)`; on failure shows Retry / "Back to roadmaps" (never an empty editable state). On success: `resetRoadmapSession(id, version)`, `progress = normalizeProgress(data)`, `rebuildIndex()`, sets `#roadmapTitle` / `#roadmapSubtitle` from the roadmap, clears search, `setView("overview")`. The one-time legacy browser-storage import is offered only for a `builtin_ai_engineer` roadmap with no saved data |
+| `openRoadmap(id)` | Shows a loading block, `RoadmapApi.getProgress(id)`; on failure shows Retry / "Back to roadmaps" (never an empty editable state). On success: `resetRoadmapSession(id, version)`, **`DATA = source === "builtin_ai_engineer" ? BUILTIN_DATA : BLANK_DATA`**, `progress = normalizeProgress(data)`, `resetViewState()`, `rebuildIndex()`, `syncTabs()`, sets `#roadmapTitle` / `#roadmapSubtitle` from the roadmap, clears search, `setView("overview")`. The one-time legacy browser-storage import is offered only for a `builtin_ai_engineer` roadmap with no saved data |
+| `resetViewState()` | Clears per-roadmap UI state so nothing leaks between roadmaps: `kanbanState.phase = null`, Checklist status/month filters back to "all", and the `expandedPhases` / `sectionOpenState` maps emptied |
+| `syncTabs()` | Hides the **Skills Checklist** and **Reference** tabs when `DATA.masteryChecklist` / `DATA.reference` are empty (always the case for a custom roadmap) and shows them otherwise |
 | `backToDashboard()` | `settleUnsavedChanges("Leave")`, then `resetRoadmapSession(null, 0)`, clears `progress`, closes any modal and calls `showDashboard()` |
 | `settleUnsavedChanges(verb)` | If edits are pending, awaits `flushNow()`; if they still can't be saved, asks the user whether to discard them. Shared by `backToDashboard()` and `logout()` |
 | `handleSessionExpired()` | Clears the save timer and `session.username`, then shows the login form; mentions unsaved changes and offers the JSON download only if a roadmap was open |
@@ -434,13 +472,15 @@ All event handling uses **event delegation** on `document` or `main` — no per-
 
 | View | What it renders |
 |------|----------------|
-| `overview` | Progress stats, phase progress bars, velocity chart, counters |
-| `timeline` | Expandable month → section → topic → subtask drill-down tree |
-| `kanban` | Per-month board with 4 columns (To Do / In Progress / Blocked / Done); drag-and-drop |
-| `checklist` | Flat task list; filter by status and phase |
+| `overview` | Progress stats, phase progress bars, velocity chart, counters (the counters block is omitted when `DATA.counters` is empty). With **no months at all** it renders `renderBlankRoadmap()` instead: an onboarding card explaining Month → Section → Topic → Tasks with an "Add your first month" button (`add-month`) |
+| `timeline` | Expandable month → section → topic → subtask drill-down tree; with no months it adds a "No months yet" hint above the add-month button |
+| `kanban` | Per-month board with 4 columns (To Do / In Progress / Blocked / Done); drag-and-drop. Uses `allPhases()[0]` when the remembered month no longer exists; with no months it shows an empty-state message |
+| `checklist` | Flat task list; filter by status and phase. With no tasks at all it says the roadmap has no tasks yet and points at the Timeline |
 | `thisweek` | Tasks in current calendar week or due within 7 days |
-| `mastery` | Skills checklist (not calendar-bound) |
-| `reference` | Read-only strategy/background content from ROADMAP |
+| `mastery` | Skills checklist (not calendar-bound) — AI Engineer roadmap only (tab hidden by `syncTabs`) |
+| `reference` | Read-only strategy/background content from ROADMAP — AI Engineer roadmap only (tab hidden by `syncTabs`) |
+
+The Overview "Timeline" tile uses `horizonEnd()`, which clamps to at least one month so an empty roadmap never computes a date from month 0.
 
 ---
 
@@ -461,8 +501,11 @@ Browser loads index.html
                RoadmapApi.getProgress(id)
                  → { data: null, version: 0 } → progress = empty store
                  → { data, version }          → progress = normalizeProgress(data); session.version = version
-               session.roadmapId = id; INDEX = buildIndex(DATA + custom content)
+               session.roadmapId = id
+               DATA = builtin_ai_engineer ? BUILTIN_DATA : BLANK_DATA
+               resetViewState(); INDEX = buildIndex(DATA + custom content); syncTabs()
                setView('overview')
+      user clicks "Create new roadmap" → modal form → RoadmapApi.create(...) → openRoadmap(newId)
       "←" button → backToDashboard() (flushes pending saves first)
 ```
 
@@ -528,7 +571,9 @@ sampleData(overrides?) → valid ProgressStore fixture
 | File | Scope |
 |------|-------|
 | `test/api.test.js` | Full HTTP integration: register, login, logout, me, progress save/load via `/api/roadmaps/:id/progress`, conflict, cross-user isolation, static serving, 404 for sensitive paths, rate limit |
-| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (another user's or malformed id → 404), atomic registration, and the one-time `user_data` migration (copies progress and version, renames to `user_data_legacy`, never re-seeds a deleted roadmap) |
+| `test/roadmaps.test.js` | Starter-roadmap seeding, list/restore/delete, ownership (another user's or malformed id → 404), atomic registration, the one-time `user_data` migration (copies progress and version, renames to `user_data_legacy`, never re-seeds a deleted roadmap), and the **custom roadmaps** block: create (trimmed name, listed after the starter, empty progress), start month seeded as version 1 and saveable, custom content staying separate per roadmap, input validation (blank/over-long/multi-line name, bad description or `startMonth`), markup in names stored verbatim, the 20-roadmap cap (and deleting frees a slot), cross-user isolation, and progress removed on delete |
+
+The suite has 59 tests (`npm test`).
 | `test/config.test.js` | `loadConfig()` with various env var combinations; production secret validation |
 | `test/schema.test.js` | `validateProgress()`: valid stores, each invalid field type, nested violations, extra top-level keys |
 

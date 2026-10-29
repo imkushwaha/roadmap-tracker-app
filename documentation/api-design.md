@@ -165,7 +165,7 @@ The old `/api/data` endpoints no longer exist; their behaviour moved to `/api/ro
 | `id` | integer | |
 | `name` | string | |
 | `description` | string | May be empty |
-| `source` | string | `"builtin_ai_engineer"` today |
+| `source` | string | `"builtin_ai_engineer"` (static AI Engineer curriculum) or `"custom"` (user-built, starts empty) |
 | `createdAt` | string | ISO-8601 UTC |
 | `lastActivityAt` | string \| null | Only in the list response: when progress was last saved; `null` if never |
 
@@ -196,7 +196,52 @@ A user who deleted every roadmap gets `{ "roadmaps": [] }`.
 
 ### POST `/api/roadmaps`
 
-Currently only **restores the built-in AI Engineer roadmap** after it was deleted. Creating custom roadmaps is planned for a later phase.
+Two modes, chosen by the `source` field.
+
+#### Mode 1 — create a custom roadmap (`source` omitted or `"custom"`)
+
+Creates an **empty** roadmap. It has no curriculum of its own: months, sections, topics and tasks are added afterwards inside the roadmap (stored in its progress data under `custom`), using the same editors as the AI Engineer roadmap.
+
+**Request body**
+```json
+{
+  "name": "Learn Rust",
+  "description": "Twelve weeks of systems programming",
+  "startMonth": "2026-12"
+}
+```
+
+| Field | Required | Rule |
+|-------|----------|------|
+| `name` | Yes | String, trimmed, 1–80 characters, single line (no control characters) |
+| `description` | No | String, trimmed, at most 300 characters |
+| `startMonth` | No | `"YYYY-MM"`, or `null`/omitted |
+
+With a `startMonth`, the server also writes the roadmap's first progress row at **version 1** (empty progress with `settings.startMonth` set), in the same transaction as the roadmap. Without one there is no progress row (`version: 0`) and the app defaults Month 1 to the current month.
+
+**Success — 201 Created**
+```json
+{
+  "roadmap": {
+    "id": 4,
+    "name": "Learn Rust",
+    "description": "Twelve weeks of systems programming",
+    "source": "custom",
+    "createdAt": "2026-10-29T11:02:10.512Z"
+  }
+}
+```
+
+**Failure — 400 Bad Request** (validation) — `{ "error": "<message>" }`, for example `"Roadmap name is required."`, `"Roadmap name must be 1–80 characters on a single line."`, `"Description must be at most 300 characters."`, `"Start month must look like \"YYYY-MM\"."`
+
+**Failure — 409 Conflict** (an account may own at most **20** roadmaps)
+```json
+{ "error": "You can have at most 20 roadmaps." }
+```
+
+#### Mode 2 — restore the built-in roadmap (`source: "builtin_ai_engineer"`)
+
+Re-creates the AI Engineer roadmap after it was deleted.
 
 **Request body**
 ```json
@@ -216,15 +261,14 @@ Currently only **restores the built-in AI Engineer roadmap** after it was delete
 }
 ```
 
-**Failure — 400 Bad Request** (`source` missing or anything other than `builtin_ai_engineer`)
-```json
-{ "error": "Only the AI Engineer roadmap can be created right now." }
-```
-
 **Failure — 409 Conflict** (the user already has one)
 ```json
 { "error": "You already have this roadmap." }
 ```
+
+#### Unknown source
+
+Any other `source` value returns **400** `{ "error": "Unknown roadmap source." }`.
 
 ---
 
@@ -363,12 +407,12 @@ These paths serve the application assets. They are an explicit allowlist — all
 | Code | Meaning | Used When |
 |------|---------|-----------|
 | 200 | OK | Successful GET or PUT |
-| 201 | Created | Successful register; restoring the AI Engineer roadmap |
+| 201 | Created | Successful register; creating a custom roadmap; restoring the AI Engineer roadmap |
 | 204 | No Content | Successful logout; successful roadmap delete |
 | 400 | Bad Request | Missing fields, validation failure |
 | 401 | Unauthorized | Missing or invalid session cookie |
 | 404 | Not Found | Roadmap id unknown, malformed, or owned by another user |
-| 409 | Conflict | Username taken (register), version mismatch (PUT progress), or roadmap already exists (POST /api/roadmaps) |
+| 409 | Conflict | Username taken (register), version mismatch (PUT progress), built-in roadmap already exists (restore), or the 20-roadmap limit reached (create) |
 | 413 | Payload Too Large | Request body > 5 MB |
 | 429 | Too Many Requests | Rate limit exceeded |
 | 500 | Internal Server Error | Unexpected server fault |

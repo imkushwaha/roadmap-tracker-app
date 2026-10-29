@@ -2,7 +2,7 @@
   "name": "roadmap-dashboard",
   "version": "1.0.0",
   "private": true,
-  "description": "AI Engineer roadmap progress dashboard with per-user login and SQLite persistence",
+  "description": "Roadmap tracker with per-user login, multiple roadmaps and Turso (libSQL) persistence",
   "main": "server/index.js",
   "engines": {
     "node": ">=22"

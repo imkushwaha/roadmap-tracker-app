@@ -6,7 +6,18 @@
 (function () {
   "use strict";
 
-  const DATA = window.ROADMAP_DATA;
+  const BUILTIN_DATA = window.ROADMAP_DATA;
+  // Custom roadmaps ship no curriculum: every month, section, topic and task
+  // comes from the user's own additions (progress.custom).
+  const BLANK_DATA = Object.freeze({
+    meta: { horizonStart: null },
+    phases: [],
+    counters: [],
+    masteryChecklist: [],
+    reference: [],
+  });
+  // The curriculum of the roadmap that is currently open.
+  let DATA = BUILTIN_DATA;
   const STORAGE_KEY = "roadmap-dashboard:progress:v1";
   const THEME_KEY = "roadmap-dashboard:theme";
 
@@ -316,7 +327,7 @@
     return phaseStartDate(1);
   }
   function horizonEnd() {
-    return phaseEndDate(allPhases().length);
+    return phaseEndDate(Math.max(1, allPhases().length));
   }
 
   function currentPhase() {
@@ -478,7 +489,24 @@
   // ---------------------------------------------------------
   // VIEW: Overview
   // ---------------------------------------------------------
+  function renderBlankRoadmap(container) {
+    container.innerHTML = `
+      <div class="section-title">Let's build your roadmap</div>
+      <div class="card blank-roadmap">
+        <p>This roadmap is empty. Lay it out the way the AI Engineer roadmap is organised:</p>
+        <ol>
+          <li><strong>Month</strong> — a block of time with an objective.</li>
+          <li><strong>Section</strong> — a week, or a theme, inside the month.</li>
+          <li><strong>Topic</strong> — a subject to cover in that section.</li>
+          <li><strong>Tasks</strong> — the checkable steps inside a topic.</li>
+        </ol>
+        <p>Start by adding your first month. You can add sections, topics and tasks from the Timeline at any time.</p>
+        <button class="btn btn-primary" data-action="add-month">＋ Add your first month</button>
+      </div>`;
+  }
+
   function renderOverview(container) {
+    if (allPhases().length === 0) { renderBlankRoadmap(container); return; }
     const overall = overallStats();
     const cur = currentPhase();
     const curSection = currentSection(cur);
@@ -559,7 +587,7 @@
         <div class="stat-tile"><div class="stat-label">${statusChip("not_started")}</div><div class="stat-value">${overall.notStarted}</div></div>
       </div>
 
-      <div class="section-title">Interview & career counters</div>
+      ${DATA.counters.length ? `<div class="section-title">Interview & career counters</div>` : ""}
       <div class="grid grid-stats">
         ${DATA.counters.map((c) => {
           const val = getCounter(c.id, c.current);
@@ -610,6 +638,7 @@
           </div>`;
         }).join("")}
       </div>
+      ${allPhases().length === 0 ? `<p class="empty-hint" style="margin-left:28px;">No months yet — add your first one below.</p>` : ""}
       <button class="add-topic-btn add-month-btn" data-action="add-month">＋ Add month (Month ${allPhases().length + 1} · ${esc(phaseCalendarLabel(allPhases().length + 1))})</button>
     `;
   }
@@ -720,7 +749,9 @@
         <span style="font-size:12px; color:var(--text-faint); margin-left:auto;">${entries.length} task${entries.length === 1 ? "" : "s"}</span>
       </div>
       <div id="checklistBody">
-        ${phaseIds.length === 0 ? emptyState("No tasks match your filters.") : phaseIds.map((pid) => {
+        ${phaseIds.length === 0 ? emptyState(INDEX.length
+          ? "No tasks match your filters."
+          : "This roadmap has no tasks yet. Add months, topics and tasks from the Timeline.") : phaseIds.map((pid) => {
           const phase = byPhase[pid];
           return `<div class="phase-section-group">
             <div class="psg-head">Month ${phase.number} — ${esc(phase.title)}</div>
@@ -791,9 +822,14 @@
   const kanbanState = { phase: null };
 
   function renderKanban(container) {
-    if (!kanbanState.phase) {
+    if (allPhases().length === 0) {
+      container.innerHTML = `<div class="section-title">Kanban</div>` +
+        emptyState("Add a month with some tasks from the Timeline to use the board.");
+      return;
+    }
+    if (!allPhases().some((p) => p.id === kanbanState.phase)) {
       const cur = currentPhase();
-      kanbanState.phase = cur ? cur.id : DATA.phases[0].id;
+      kanbanState.phase = cur ? cur.id : allPhases()[0].id;
     }
     const q = state.search.trim().toLowerCase();
     const entries = INDEX.filter((e) => e.phaseId === kanbanState.phase && matchesSearch(e, q));
@@ -1364,9 +1400,12 @@
     host.querySelector(".modal").innerHTML = `
       <h2>When does Month 1 start?</h2>
       <p style="font-size:13px; color:var(--text-muted);">
-        The roadmap was written assuming Month 1 = ${esc(phaseCalendarLabelFor(defaultStartMonth()))}.
-        Set your real start month and every phase, week and "you are here"
-        marker shifts to match — nothing else about your progress changes.
+        ${DATA === BUILTIN_DATA
+          ? `The roadmap was written assuming Month 1 = ${esc(phaseCalendarLabelFor(defaultStartMonth()))}.
+             Set your real start month and every phase, week and "you are here"
+             marker shifts to match — nothing else about your progress changes.`
+          : `Every month, week and "you are here" marker is counted from this start month.
+             Changing it shifts the whole plan — nothing else about your progress changes.`}
       </p>
       <div class="field">
         <label>Month 1 starts on</label>
@@ -1968,9 +2007,9 @@
       <div class="roadmap-grid">
         ${cards.join("")}
         ${restore}
-        <button type="button" class="roadmap-card action" disabled>
-          <span class="action-title">+ Create new roadmap <span class="coming-soon-badge">Coming soon</span></span>
-          <span class="action-desc">Build your own plan: months, modules and tasks.</span>
+        <button type="button" class="roadmap-card action" data-action="create-roadmap">
+          <span class="action-title">+ Create new roadmap</span>
+          <span class="action-desc">Build your own plan: months, sections, topics and tasks.</span>
         </button>
         <button type="button" class="roadmap-card action" disabled>
           <span class="action-title">✦ Create roadmap with AI <span class="coming-soon-badge">Coming soon</span></span>
@@ -1989,6 +2028,64 @@
       if (e.status !== 409) { toast("Couldn't restore the roadmap: " + e.message, "error"); return; }
     }
     showDashboard();
+  }
+
+  function openCreateRoadmapModal() {
+    const host = $("modalHost");
+    const thisMonth = currentMonthKey();
+    host.querySelector(".modal").innerHTML = `
+      <h2>Create a new roadmap</h2>
+      <form id="createRoadmapForm" novalidate>
+        <div class="field">
+          <label for="newRoadmapName">Roadmap name</label>
+          <input type="text" id="newRoadmapName" maxlength="80" autocomplete="off" placeholder="e.g. Learn Rust in 12 weeks" />
+        </div>
+        <div class="field">
+          <label for="newRoadmapDesc">Description (optional)</label>
+          <textarea id="newRoadmapDesc" maxlength="300" placeholder="What is this plan for?"></textarea>
+        </div>
+        <div class="field">
+          <label for="newRoadmapStart">Month 1 starts in</label>
+          <input type="month" id="newRoadmapStart" value="${esc(thisMonth)}" min="${esc(thisMonth)}" />
+        </div>
+        <p style="font-size:12px; color:var(--text-faint); margin:0 0 4px;">
+          Next you'll add months, sections, topics and tasks — laid out like the AI Engineer roadmap.
+        </p>
+        <p id="createRoadmapError" class="auth-error" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-action="close-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="createRoadmapSubmit">Create roadmap</button>
+        </div>
+      </form>`;
+    host.classList.remove("hidden");
+    $("newRoadmapName").focus();
+  }
+
+  async function submitCreateRoadmap() {
+    const error = $("createRoadmapError");
+    const name = $("newRoadmapName").value.trim();
+    const startMonth = $("newRoadmapStart").value;
+    error.textContent = "";
+    if (!name) { error.textContent = "Give your roadmap a name."; $("newRoadmapName").focus(); return; }
+    if (startMonth && startMonth < currentMonthKey()) {
+      error.textContent = "Start month can't be before the current month.";
+      return;
+    }
+    const submit = $("createRoadmapSubmit");
+    submit.disabled = true;
+    try {
+      const res = await window.RoadmapApi.create({
+        name,
+        description: $("newRoadmapDesc").value.trim(),
+        startMonth: startMonth || undefined,
+      });
+      closeModal();
+      openRoadmap(res.roadmap.id);
+    } catch (e) {
+      if (e.status === 401) { handleSessionExpired(); return; }
+      error.textContent = e.message;
+      submit.disabled = false;
+    }
   }
 
   function confirmDeleteRoadmap(id) {
@@ -2036,8 +2133,11 @@
       return;
     }
     resetRoadmapSession(res.roadmap.id, res.version || 0);
+    DATA = res.roadmap.source === "builtin_ai_engineer" ? BUILTIN_DATA : BLANK_DATA;
     progress = normalizeProgress(res.data);
+    resetViewState();
     rebuildIndex();
+    syncTabs();
     hideAuth();
     unlockApp();
     $("roadmapTitle").textContent = res.roadmap.name;
@@ -2051,6 +2151,22 @@
     if (res.data === null && res.roadmap.source === "builtin_ai_engineer" && readLegacyLocalData()) {
       openLegacyModal(false);
     }
+  }
+
+  // Per-roadmap UI state must not leak from one roadmap into the next.
+  function resetViewState() {
+    kanbanState.phase = null;
+    checklistFilters.status = "all";
+    checklistFilters.phase = "all";
+    [expandedPhases, sectionOpenState].forEach((m) => Object.keys(m).forEach((k) => delete m[k]));
+  }
+
+  // Skills and Reference only exist for roadmaps whose curriculum provides them.
+  function syncTabs() {
+    const available = { mastery: DATA.masteryChecklist.length > 0, reference: DATA.reference.length > 0 };
+    document.querySelectorAll(".tab").forEach((t) => {
+      if (t.dataset.view in available) t.classList.toggle("hidden", !available[t.dataset.view]);
+    });
   }
 
   // Flush pending edits before leaving the open roadmap; false if the user chose to stay.
@@ -2077,6 +2193,7 @@
       case "open-roadmap": openRoadmap(Number(el.dataset.id)); break;
       case "delete-roadmap": confirmDeleteRoadmap(el.dataset.id); break;
       case "restore-builtin": restoreBuiltinRoadmap(); break;
+      case "create-roadmap": openCreateRoadmapModal(); break;
       case "retry-dashboard": showDashboard(); break;
       default: break;
     }
@@ -2189,6 +2306,11 @@
     $("dashboardLogoutBtn").addEventListener("click", logout);
     $("backToDashboardBtn").addEventListener("click", backToDashboard);
     $("dashboardContent").addEventListener("click", onDashboardClick);
+    $("modalHost").addEventListener("submit", (e) => {
+      if (e.target.id !== "createRoadmapForm") return;
+      e.preventDefault();
+      submitCreateRoadmap();
+    });
     $("panelSaveStatus").addEventListener("click", () => {
       const kind = $("panelSaveStatus").dataset.kind;
       if (kind === "error") { session.retries = 0; flushSave(); }

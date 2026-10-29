@@ -105,10 +105,12 @@ CREATE INDEX IF NOT EXISTS idx_roadmaps_user ON roadmaps(user_id);
 | `user_id` | INTEGER | NOT NULL, FK → `users.id`, CASCADE | Owner |
 | `name` | TEXT | NOT NULL | Display name, e.g. `AI Engineer Roadmap` |
 | `description` | TEXT | NOT NULL, DEFAULT `''` | Shown as the subtitle inside the roadmap |
-| `source` | TEXT | NOT NULL | `builtin_ai_engineer` today; no CHECK constraint, so future sources need no migration |
+| `source` | TEXT | NOT NULL | `builtin_ai_engineer` (static AI Engineer curriculum, metadata-only row) or `custom` (user-built roadmap that starts empty); no CHECK constraint, so future sources need no migration |
 | `created_at` | TEXT | NOT NULL, DEFAULT | ISO-8601 UTC timestamp |
 
-The built-in name, description and source live in `server/roadmaps/builtin.js` (`BUILTIN_AI_ENGINEER`) and are shared by registration, the legacy migration and the restore endpoint.
+The built-in name, description and source live in `server/roadmaps/builtin.js` (`BUILTIN_AI_ENGINEER`) and are shared by registration, the legacy migration and the restore endpoint. The `custom` source constant and the creation limits (name ≤ 80, description ≤ 300, at most 20 roadmaps per user) live in `server/roadmaps/validators.js`.
+
+**There is no definition column.** A `custom` roadmap stores no curriculum of its own — its months, sections, topics and tasks live in its progress blob (`ProgressStore.custom`, section 4). The application treats the curriculum of a `custom` roadmap as empty (`BLANK_DATA`) and layers `custom` on top, exactly as it already does for user additions to the AI Engineer roadmap. This avoids a second source of truth and the problem of progress keys orphaned by a changed definition.
 
 ---
 
@@ -177,6 +179,16 @@ type ProgressStore = {
 };
 ```
 
+**Custom roadmaps.** For a `source = 'custom'` roadmap this blob is the *whole* plan: `custom.phases` are its months (with their sections) and `custom.topics` its topics and tasks, edited in the app with the Month → Section (week or theme) → Topic → Tasks editors. For the AI Engineer roadmap the same `custom` block holds only the user's additions on top of the static curriculum. An empty starting blob is built by `emptyProgress(startMonth)` in `server/roadmaps/progress.js`:
+
+```json
+{ "items": {}, "counters": {}, "celebratedPhases": [],
+  "settings": { "startMonth": "2026-12" },
+  "custom": { "topics": [], "phases": [] } }
+```
+
+The router only writes this blob at creation time when a start month was chosen; see "Create a custom roadmap" below.
+
 **Validation rules:**
 - Top-level keys not listed above are **tolerated** (import/export compatibility)
 - `items[*].status` must be one of the four enum values
@@ -237,12 +249,25 @@ FROM roadmaps WHERE id = ? AND user_id = ?;
 ```
 No row means 404 — whether the id is unknown or belongs to someone else.
 
+### Create a custom roadmap
+`POST /api/roadmaps` first enforces the per-user cap, then inserts. When the request carries a `startMonth`, the roadmap and its first progress row go in **one `db.batch` transaction**, so the progress row can never be missing or orphaned:
+
+```sql
+SELECT COUNT(*) AS n FROM roadmaps WHERE user_id = ?;                  -- >= 20 -> 409
+INSERT INTO roadmaps (user_id, name, description, source) VALUES (?, ?, ?, 'custom');
+INSERT INTO roadmap_progress (roadmap_id, data, version, updated_at)
+VALUES (last_insert_rowid(), ?, 1, ?);                                 -- only when startMonth was given
+```
+Without a `startMonth` only the first statement runs: there is no progress row (`version: 0`) until the first autosave.
+
 ### Restore the built-in roadmap / delete a roadmap
 ```sql
 SELECT 1 FROM roadmaps WHERE user_id = ? AND source = ?;               -- already have it? -> 409
 INSERT INTO roadmaps (user_id, name, description, source) VALUES (?, ?, ?, ?);
 DELETE FROM roadmaps WHERE id = ? AND user_id = ?;                     -- rowsAffected 0 -> 404; progress cascades
 ```
+
+All of these statements live in `server/roadmaps/repository.js` (`createRoadmapRepository(db)`); the router never builds SQL.
 
 ### Save roadmap progress (first save vs. update)
 The `PUT /api/roadmaps/:id/progress` route performs an atomic compare-and-swap using a **single statement** (no explicit transaction), after the ownership check above. The statement depends on the client's version:

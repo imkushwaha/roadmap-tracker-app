@@ -113,6 +113,13 @@
     list: () => call("GET", "/api/roadmaps"),
 
     /**
+     * Create an empty custom roadmap.
+     * @param {{ name: string, description?: string, startMonth?: string }} body - startMonth is "YYYY-MM".
+     * @returns {Promise<{ roadmap: RoadmapSummary }>}
+     */
+    create: (body) => call("POST", "/api/roadmaps", body),
+
+    /**
      * Re-create the built-in AI Engineer roadmap after it was deleted.
      * @returns {Promise<{ roadmap: RoadmapSummary }>}
      */
