@@ -99,11 +99,18 @@ async function getCurrentUser(req, db, secret) {
   const payload = verifyToken(token, secret);
   if (!payload) return null;
   const result = await db.execute({
-    sql: "SELECT id, username FROM users WHERE id = ?",
+    sql: "SELECT id, username, first_name, last_name FROM users WHERE id = ?",
     args: [Number(payload.sub)],
   });
   const row = result.rows[0];
-  return row ? { id: Number(row.id), username: String(row.username) } : null;
+  return row
+    ? {
+        id: Number(row.id),
+        username: String(row.username),
+        firstName: String(row.first_name || ""),
+        lastName: String(row.last_name || ""),
+      }
+    : null;
 }
 
 /**

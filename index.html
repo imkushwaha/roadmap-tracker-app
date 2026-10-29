@@ -16,15 +16,37 @@
     <div class="auth-brand"><span aria-hidden="true">🧭</span> AI Engineer Roadmap</div>
     <h2 id="authTitle">Log in</h2>
     <p id="authNotice" class="auth-notice hidden"></p>
+
+    <!-- Register-only fields (hidden during login) -->
+    <div id="authRegisterFields" class="hidden">
+      <div class="field">
+        <label for="authFirstName">First Name</label>
+        <input id="authFirstName" type="text" autocomplete="given-name" autocapitalize="words" maxlength="64" />
+      </div>
+      <div class="field">
+        <label for="authLastName">Last Name</label>
+        <input id="authLastName" type="text" autocomplete="family-name" autocapitalize="words" maxlength="64" />
+      </div>
+    </div>
+
     <div class="field">
-      <label for="authUsername">Username</label>
+      <label id="authUsernameLabel" for="authUsername">Username</label>
       <input id="authUsername" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" />
+      <p id="authUsernameStatus" class="auth-field-hint"></p>
     </div>
     <div class="field">
       <label for="authPassword">Password</label>
       <input id="authPassword" type="password" autocomplete="current-password" maxlength="72" />
     </div>
-    <p id="authHint" class="auth-hint hidden">Username: 3–32 letters, numbers, _ or -. Password: at least 8 characters.</p>
+
+    <!-- Confirm password — register only -->
+    <div id="authConfirmPasswordField" class="field hidden">
+      <label for="authConfirmPassword">Confirm Password</label>
+      <input id="authConfirmPassword" type="password" autocomplete="new-password" maxlength="72" />
+      <p id="authPasswordMatch" class="auth-field-hint"></p>
+    </div>
+
+    <p id="authHint" class="auth-hint hidden">User ID: 3–32 letters, numbers, _ or -. Password: at least 8 characters.</p>
     <p id="authError" class="auth-error" role="alert"></p>
     <button id="authSubmit" class="btn btn-primary auth-submit" type="submit">Log in</button>
     <p class="auth-toggle"><span id="authToggleText">New here?</span> <button type="button" id="authToggle" class="link-btn">Create an account</button></p>
@@ -36,6 +58,24 @@
     <p id="authBlockText" class="auth-notice"></p>
     <div id="authBlockActions" class="modal-actions"></div>
   </div>
+
+  <footer class="auth-footer">
+    <div class="auth-footer-inner">
+      <span class="auth-footer-copy">&copy; <span id="authFooterYear"></span> AI Engineer Roadmap. All rights reserved.</span>
+      <span class="auth-footer-sep">·</span>
+      <span>Developed by
+        <a class="auth-footer-link" href="mailto:upendra.kumar48762@gmail.com">upendra.kumar48762@gmail.com</a>
+        &nbsp;|&nbsp;
+        <a class="auth-footer-link" href="https://github.com/imkushwaha" target="_blank" rel="noopener">GitHub: imkushwaha</a>
+      </span>
+      <span class="auth-footer-sep">·</span>
+      <span>If this tool helps you, please ⭐ <a class="auth-footer-link" href="https://github.com/imkushwaha" target="_blank" rel="noopener">star the repo</a>!</span>
+      <span class="auth-footer-sep">·</span>
+      <span>Built with planning &amp; development assistance from <strong>Claude</strong> (Anthropic AI).</span>
+      <span class="auth-footer-sep">·</span>
+      <span>Open source &mdash; contributions welcome.</span>
+    </div>
+  </footer>
 </div>
 
 <header class="app-header">
@@ -55,6 +95,7 @@
       </button>
       <div class="profile-panel hidden" id="profilePanel" role="menu">
         <div class="profile-panel-header">
+          <span class="profile-panel-fullname" id="panelFullName">—</span>
           <span class="profile-panel-username" id="panelUsername">—</span>
           <span class="profile-panel-save" id="panelSaveStatus" aria-live="polite"></span>
         </div>

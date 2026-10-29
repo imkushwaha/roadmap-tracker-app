@@ -1774,6 +1774,18 @@
     $("authHint").classList.toggle("hidden", !reg);
     $("authPassword").autocomplete = reg ? "new-password" : "current-password";
     $("authError").textContent = "";
+    $("authRegisterFields").classList.toggle("hidden", !reg);
+    $("authConfirmPasswordField").classList.toggle("hidden", !reg);
+    $("authUsernameLabel").textContent = reg ? "User ID" : "Username";
+    $("authUsernameStatus").textContent = "";
+    $("authUsernameStatus").className = "auth-field-hint";
+    $("authPasswordMatch").textContent = "";
+    $("authPasswordMatch").className = "auth-field-hint";
+    if (!reg) {
+      $("authFirstName").value = "";
+      $("authLastName").value = "";
+      $("authConfirmPassword").value = "";
+    }
   }
 
   function showAuth(mode, notice, opts) {
@@ -1821,18 +1833,30 @@
     err.textContent = "";
     if (!username || !password) { err.textContent = "Enter a username and password."; return; }
     if (authMode === "register") {
-      if (!/^[A-Za-z0-9_-]{3,32}$/.test(username)) { err.textContent = "Username must be 3–32 characters: letters, numbers, _ or -."; return; }
+      const firstName = $("authFirstName").value.trim();
+      const lastName  = $("authLastName").value.trim();
+      const confirmPassword = $("authConfirmPassword").value;
+      if (!firstName) { err.textContent = "Please enter your first name."; return; }
+      if (!lastName)  { err.textContent = "Please enter your last name."; return; }
+      if (!/^[A-Za-z0-9_-]{3,32}$/.test(username)) { err.textContent = "User ID must be 3–32 characters: letters, numbers, _ or -."; return; }
       if (password.length < 8) { err.textContent = "Password must be at least 8 characters."; return; }
+      if (password !== confirmPassword) { err.textContent = "Passwords do not match."; return; }
     }
     const btn = $("authSubmit");
     btn.disabled = true;
     try {
-      const res = authMode === "register"
-        ? await window.Api.register(username, password)
-        : await window.Api.login(username, password);
+      let res;
+      if (authMode === "register") {
+        const firstName = $("authFirstName").value.trim();
+        const lastName  = $("authLastName").value.trim();
+        res = await window.AuthApi.register(firstName, lastName, username, password);
+      } else {
+        res = await window.AuthApi.login(username, password);
+      }
       $("authPassword").value = "";
+      $("authConfirmPassword").value = "";
       session.expiredFor = null;
-      await loadUserData(res.user.username);
+      await loadUserData(res.user.username, res.user.firstName || "", res.user.lastName || "");
     } catch (e) {
       err.textContent = e.message;
     } finally {
@@ -1850,10 +1874,12 @@
       showBlock("Can't reach the server", e.message, [["Retry", boot]]);
       return;
     }
-    await loadUserData(me.user.username);
+    await loadUserData(me.user.username, me.user.firstName || "", me.user.lastName || "");
   }
 
-  async function loadUserData(username) {
+  async function loadUserData(username, firstName, lastName) {
+    firstName = firstName || "";
+    lastName  = lastName  || "";
     showBlock("Loading your data…", "");
     let res;
     try {
@@ -1861,18 +1887,20 @@
     } catch (e) {
       if (e.status === 401) { showAuth("login"); return; }
       // Never fall through to an empty editable state: saving it would overwrite real data.
-      showBlock("Couldn't load your data", e.message, [["Retry", () => loadUserData(username)], ["Log out", logout]]);
+      showBlock("Couldn't load your data", e.message, [["Retry", () => loadUserData(username, firstName, lastName)], ["Log out", logout]]);
       return;
     }
     clearTimeout(session.timer);
-    Object.assign(session, { username, version: res.version || 0, dirty: false, saving: false,
-      conflict: false, conflictServer: null, retries: 0, expiredFor: null });
+    Object.assign(session, { username, firstName, lastName, version: res.version || 0, dirty: false,
+      saving: false, conflict: false, conflictServer: null, retries: 0, expiredFor: null });
     progress = normalizeProgress(res.data);
     rebuildIndex();
     hideAuth();
     unlockApp();
-    $("profileName").textContent = username;
-    $("panelUsername").textContent = username;
+    const fullName = [firstName, lastName].filter(Boolean).join(" ") || username;
+    $("profileName").textContent = fullName;
+    $("panelFullName").textContent = fullName;
+    $("panelUsername").textContent = "@" + username;
     setSaveStatus("saved");
     rerender();
     checkMilestones();
@@ -1939,10 +1967,49 @@
     toast("Imported your local data — saving to your account…", "success");
   }
 
+  function debounce(fn, delay) {
+    let t;
+    return function (...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
+  }
+
   function wireSyncEvents() {
     $("authForm").addEventListener("submit", submitAuth);
     $("authToggle").addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
     $("authDownload").addEventListener("click", exportProgress);
+
+    // Live username availability check (register mode only)
+    $("authUsername").addEventListener("input", debounce(async () => {
+      if (authMode !== "register") return;
+      const val = $("authUsername").value.trim();
+      const el = $("authUsernameStatus");
+      if (val.length < 3 || !/^[A-Za-z0-9_-]{1,32}$/.test(val)) {
+        el.textContent = "";
+        el.className = "auth-field-hint";
+        return;
+      }
+      el.textContent = "Checking…";
+      el.className = "auth-field-hint checking";
+      try {
+        const r = await window.AuthApi.checkUsername(val);
+        if ($("authUsername").value.trim() !== val) return; // stale
+        el.textContent = r.available ? "✓ Available" : "✗ Already taken";
+        el.className = "auth-field-hint " + (r.available ? "available" : "taken");
+      } catch { el.textContent = ""; el.className = "auth-field-hint"; }
+    }, 400));
+
+    // Live password match indicator
+    function updatePasswordMatch() {
+      if (authMode !== "register") return;
+      const pw  = $("authPassword").value;
+      const cpw = $("authConfirmPassword").value;
+      const el  = $("authPasswordMatch");
+      if (!pw || !cpw) { el.textContent = ""; el.className = "auth-field-hint"; return; }
+      const match = pw === cpw;
+      el.textContent = match ? "✓ Passwords match" : "✗ Passwords do not match";
+      el.className = "auth-field-hint " + (match ? "match" : "mismatch");
+    }
+    $("authPassword").addEventListener("input", updatePasswordMatch);
+    $("authConfirmPassword").addEventListener("input", updatePasswordMatch);
     $("logoutBtn").addEventListener("click", logout);
     $("panelSaveStatus").addEventListener("click", () => {
       const kind = $("panelSaveStatus").dataset.kind;
@@ -1968,6 +2035,8 @@
       document.getElementById("main").innerHTML = emptyState("Could not load roadmap data (data/roadmap.js missing).");
       return;
     }
+    const footerYear = document.getElementById("authFooterYear");
+    if (footerYear) footerYear.textContent = new Date().getFullYear();
     initTheme();
     wireEvents();
     wireSyncEvents();

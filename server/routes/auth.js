@@ -17,7 +17,7 @@ const {
   getCurrentUser,
   buildCookieOptions,
 } = require("../auth/service");
-const { validateUsername, validatePassword } = require("../auth/validators");
+const { validateName, validateUsername, validatePassword } = require("../auth/validators");
 
 const SESSION_DAYS = 7;
 const RATE_LIMIT_MESSAGE = {
@@ -77,9 +77,31 @@ function createAuthRouter({
   // Only failed logins count toward the login limit so normal use never locks out.
   const registerLimiter = expressRateLimit({ ...rateLimitBase });
   const loginLimiter = expressRateLimit({ ...rateLimitBase, skipSuccessfulRequests: true });
+  const checkUsernameLimiter = expressRateLimit({
+    ...rateLimitBase,
+    limit: 30,
+    message: RATE_LIMIT_MESSAGE,
+  });
+
+  router.get("/check-username", checkUsernameLimiter, async (req, res) => {
+    const { username } = req.query;
+    const uCheck = validateUsername(username);
+    if (!uCheck.valid) return res.status(400).json({ error: uCheck.error });
+    const found = await db.execute({
+      sql: "SELECT 1 FROM users WHERE username = ?",
+      args: [username],
+    });
+    res.json({ available: found.rows.length === 0 });
+  });
 
   router.post("/register", registerLimiter, async (req, res) => {
-    const { username, password } = req.body || {};
+    const { firstName, lastName, username, password } = req.body || {};
+
+    const fnCheck = validateName(firstName, "First name");
+    if (!fnCheck.valid) return res.status(400).json({ error: fnCheck.error });
+
+    const lnCheck = validateName(lastName, "Last name");
+    if (!lnCheck.valid) return res.status(400).json({ error: lnCheck.error });
 
     const uCheck = validateUsername(username);
     if (!uCheck.valid) return res.status(400).json({ error: uCheck.error });
@@ -88,11 +110,13 @@ function createAuthRouter({
     if (!pCheck.valid) return res.status(400).json({ error: pCheck.error });
 
     const hash = await hashPassword(password, bcryptCost);
+    const fn = firstName.trim();
+    const ln = lastName.trim();
     let id;
     try {
       const result = await db.execute({
-        sql: "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-        args: [username, hash],
+        sql: "INSERT INTO users (username, password_hash, first_name, last_name) VALUES (?, ?, ?, ?)",
+        args: [username, hash, fn, ln],
       });
       id = result.lastInsertRowid;
     } catch (e) {
@@ -101,9 +125,9 @@ function createAuthRouter({
       }
       throw e;
     }
-    const user = { id: Number(id), username };
+    const user = { id: Number(id), username, firstName: fn, lastName: ln };
     issueSession(res, user);
-    res.status(201).json({ user: { username } });
+    res.status(201).json({ user: { username, firstName: fn, lastName: ln } });
   });
 
   router.post("/login", loginLimiter, async (req, res) => {
@@ -117,14 +141,20 @@ function createAuthRouter({
       return invalid();
     }
     const found = await db.execute({
-      sql: "SELECT id, username, password_hash FROM users WHERE username = ?",
+      sql: "SELECT id, username, password_hash, first_name, last_name FROM users WHERE username = ?",
       args: [username],
     });
     const row = found.rows[0];
     const ok = await verifyPassword(password, row ? row.password_hash : dummyHash);
     if (!row || !ok) return invalid();
-    issueSession(res, { id: Number(row.id), username: String(row.username) });
-    res.json({ user: { username: String(row.username) } });
+    const u = {
+      id: Number(row.id),
+      username: String(row.username),
+      firstName: String(row.first_name || ""),
+      lastName: String(row.last_name || ""),
+    };
+    issueSession(res, u);
+    res.json({ user: { username: u.username, firstName: u.firstName, lastName: u.lastName } });
   });
 
   router.post("/logout", (_req, res) => {
@@ -137,7 +167,7 @@ function createAuthRouter({
     const user = await getCurrentUser(req, db, secret);
     if (!user) return res.status(401).json({ error: "Not authenticated" });
     issueSession(res, user); // rolling session: active users stay logged in
-    res.json({ user: { username: user.username } });
+    res.json({ user: { username: user.username, firstName: user.firstName, lastName: user.lastName } });
   });
 
   return router;

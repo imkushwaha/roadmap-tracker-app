@@ -76,12 +76,22 @@
 
     /**
      * Create a new user account and start a session.
+     * @param {string} firstName
+     * @param {string} lastName
      * @param {string} username
      * @param {string} password
      * @returns {Promise<AuthResponse>}
      */
-    register: (username, password) =>
-      call("POST", "/api/auth/register", { username, password }),
+    register: (firstName, lastName, username, password) =>
+      call("POST", "/api/auth/register", { firstName, lastName, username, password }),
+
+    /**
+     * Check whether a username is available (not yet taken).
+     * @param {string} username
+     * @returns {Promise<{ available: boolean }>}
+     */
+    checkUsername: (username) =>
+      call("GET", "/api/auth/check-username?username=" + encodeURIComponent(username)),
 
     /**
      * End the current session.
