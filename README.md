@@ -41,6 +41,7 @@ A single-page web application for tracking progress through structured roadmaps.
 - **Create new roadmap** — give it a name, an optional description and the month Month 1 starts in; it opens as an empty roadmap that you build with the in-roadmap editors (Month → Section, a week or a theme → Topic → Tasks). An empty roadmap shows an onboarding card with an **Add your first month** button
 - Up to **20 roadmaps** per account
 - **Create roadmap with AI** is shown as *Coming soon*
+- **Appearance** — Light, Dark or **System** (follows your operating system live); the choice is remembered per browser and applied before the page paints, so there is no flash
 
 Views inside a roadmap:
 
@@ -139,7 +140,7 @@ Open http://localhost:3000, choose **Create an account**, and start tracking. Ex
 npm test
 ```
 
-All 58 tests cover auth flows, roadmap list/create/delete/restore, custom-roadmap input validation and the 20-roadmap cap, per-roadmap progress save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
+All 59 tests cover auth flows, roadmap list/create/delete/restore, custom-roadmap input validation and the 20-roadmap cap, per-roadmap progress save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
 
 ### Regenerate Roadmap Data
 
@@ -159,9 +160,16 @@ roadmap-dashboard/
 │
 ├── index.html                    App shell + login screen
 ├── css/
-│   └── styles.css                All styling (light + dark themes)
+│   ├── tokens.css                Design tokens: colour, radius, spacing (light + dark)
+│   ├── base.css                  Fonts, reset, typography, focus ring, reduced motion
+│   ├── components.css            Buttons, fields, chips, modal, toasts, …
+│   └── styles.css                Layout + per-view rules (shrinking during the redesign)
+├── fonts/                        IBM Plex Sans (self-hosted, SIL OFL)
+├── img/                          logo.svg, favicon.svg
 │
 ├── js/
+│   ├── theme-boot.js             Light / Dark / System, applied before first paint (window.Theme)
+│   ├── icons.js                  Inline SVG icon set (window.Icons)
 │   ├── app.js                    UI state, rendering, dashboard, autosave, auth
 │   ├── api.js                    HTTP client (AuthApi, RoadmapApi)
 │   └── progress-schema.js        Progress data validator (UMD — browser + server)
@@ -588,7 +596,7 @@ The progress `PUT` uses **compare-and-swap** in a single atomic statement (`UPDA
 
 ### Static files served
 
-`/`, `/index.html`, `/css/*`, `/js/*`, `/data/roadmap.js`
+`/`, `/index.html`, `/css/*`, `/js/*`, `/fonts/*`, `/img/*`, `/data/roadmap.js`
 
 Everything else (database, `.env`, server source, `package.json`, `node_modules`) returns `404`.
 
@@ -607,7 +615,8 @@ Everything else (database, `.env`, server source, `package.json`, `node_modules`
 | Input validation | Username regex + password length checked before any DB call. Progress data validated against the schema before every write. |
 | Database credentials | `TURSO_AUTH_TOKEN` lives only in environment variables (`.env` is git-ignored; `sync: false` in `render.yaml` keeps it out of the repo). |
 | SQL injection | All queries are parameterised via `db.execute({ sql, args })` (`@libsql/client`); values are never interpolated into SQL. User data queries are always scoped by session user id, never by request body. |
-| Static allowlist | Only four path patterns serve files; `path.join` + `sendFile` prevent path-traversal. |
+| Static allowlist | Only an explicit list of paths serves files (`/`, `/css`, `/js`, `/fonts`, `/img`, `/data/roadmap.js`); `path.join` + `sendFile` prevent path-traversal. |
+| Content Security Policy | `helmet` default CSP: scripts only from `'self'` (no inline scripts), so the theme script is the external `js/theme-boot.js`. Fonts are self-hosted; no third-party requests. |
 
 **Not included by design:** password reset, email verification, 2FA, account deletion UI, admin interface, JWT revocation.
 

@@ -6,7 +6,11 @@
 roadmap-dashboard/
 ├── index.html                     ← SPA shell (all script/style tags)
 ├── css/
-│   └── styles.css                 ← All UI styles (light + dark theme)
+│   ├── tokens.css                 ← Design tokens (light + dark) — see design-system.md
+│   ├── base.css                   ← Fonts, reset, focus ring, reduced motion
+│   ├── components.css             ← Buttons, fields, chips, modal, toasts
+│   └── styles.css                 ← Layout + per-view styles (shrinking)
+├── fonts/  img/                   ← Self-hosted IBM Plex Sans; logo and favicon
 ├── js/
 │   ├── progress-schema.js         ← UMD validator (browser + Node)
 │   ├── api.js                     ← AuthApi + RoadmapApi (fetch wrappers)
@@ -69,7 +73,7 @@ Cache-Control: no-store         — on every /api response
 express.json({ limit: '5mb' }) — parse JSON body (5 MB max)
 /api/auth/*     → authRouter     — auth routes (rate-limited; /me checks the session itself)
 /api/roadmaps/* → roadmapsRouter — protected (router.use(requireAuth) inside)
-Static allowlist                — index.html, css/, js/, data/roadmap.js
+Static allowlist                — index.html, css/, js/, fonts/, img/, data/roadmap.js
 404 handler                     — all other paths return { error: 'Not found' }
 ```
 

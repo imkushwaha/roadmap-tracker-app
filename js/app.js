@@ -20,7 +20,6 @@
   // The curriculum of the roadmap that is currently open.
   let DATA = BUILTIN_DATA;
   const STORAGE_KEY = "roadmap-dashboard:progress:v1";
-  const THEME_KEY = "roadmap-dashboard:theme";
 
   const STATUS = ["not_started", "in_progress", "completed", "blocked"];
   const STATUS_LABEL = {
@@ -437,7 +436,9 @@
   }
 
   function statusSelect(id, status) {
-    return `<select class="status-select" data-action="set-status" data-id="${id}">
+    const entry = indexEntry(id);
+    const label = entry ? `Status: ${entry.title}` : "Status";
+    return `<select class="status-select" data-action="set-status" data-id="${id}" aria-label="${esc(label)}">
       ${STATUS.map((s) => `<option value="${s}" ${s === status ? "selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}
     </select>`;
   }
@@ -554,7 +555,7 @@
             const isDone = st.pct === 100;
             return `<div style="margin-bottom:12px;">
               <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px;">
-                <span style="font-weight:700;">M${p.number} — ${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">YOU ARE HERE</span>' : ""} ${isDone ? '<span class="badge" style="background:var(--status-completed-bg); color:var(--status-completed);">✓ done</span>' : ""}</span>
+                <span style="font-weight:700;">M${p.number} — ${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">Current</span>' : ""} ${isDone ? '<span class="badge" style="background:var(--status-completed-bg); color:var(--status-completed);">✓ done</span>' : ""}</span>
                 <span style="color:var(--text-faint);">${fmtDateShort(phaseStartDate(p.number))}–${fmtDateShort(phaseEndDate(p.number))}</span>
               </div>
               ${progressBar(st.pct)}
@@ -627,7 +628,7 @@
               <div class="phase-card-head">
                 <div>
                   <div class="phase-num">Month ${p.number} · ${esc(phaseCalendarLabel(p.number))}</div>
-                  <div class="phase-title">${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">YOU ARE HERE</span>' : ""}${p.custom ? ' <span class="badge badge-custom">Custom</span>' : ""}</div>
+                  <div class="phase-title">${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">Current</span>' : ""}${p.custom ? ' <span class="badge badge-custom">Custom</span>' : ""}</div>
                   <div class="phase-dates">${fmtDate(phaseStartDate(p.number))} – ${fmtDate(phaseEndDate(p.number))}${p.custom ? ` <button class="mini-btn" data-action="delete-month" data-id="${p.id}" title="Delete this month and everything in it">🗑 Delete month</button>` : ""}</div>
                 </div>
                 <button class="phase-expand-btn" data-action="toggle-phase" data-id="${p.id}">${expandedPhases[p.id] ? "Collapse" : "Expand"}</button>
@@ -743,7 +744,7 @@
       <div class="section-title">Checklist</div>
       <div class="filter-bar">
         ${["all", ...STATUS].map((s) => `<button class="chip-filter ${checklistFilters.status === s ? "active" : ""}" data-action="filter-status" data-value="${s}">${s === "all" ? "All" : STATUS_LABEL[s]}</button>`).join("")}
-        <select class="select-filter" data-action="filter-phase">
+        <select class="select-filter" data-action="filter-phase" aria-label="Filter by month">
           <option value="all">All months</option>
           ${allPhases().map((p) => `<option value="${p.id}" ${checklistFilters.phase === p.id ? "selected" : ""}>Month ${p.number} — ${esc(p.title)}</option>`).join("")}
         </select>
@@ -847,7 +848,7 @@
     container.innerHTML = `
       <div class="section-title">Kanban</div>
       <div class="kanban-toolbar">
-        <select class="select-filter" data-action="kanban-phase">
+        <select class="select-filter" data-action="kanban-phase" aria-label="Month">
           ${allPhases().map((p) => `<option value="${p.id}" ${kanbanState.phase === p.id ? "selected" : ""}>Month ${p.number} — ${esc(p.title)}</option>`).join("")}
         </select>
         <span style="font-size:12px; color:var(--text-faint);">Drag cards between columns, or use the ⋯ menu on a card.</span>
@@ -888,7 +889,7 @@
             <h3>${esc(cat.title)} <span style="color:var(--text-faint); font-weight:600; font-size:11.5px;">(${done}/${cat.skills.length})</span></h3>
             ${skills.map((sk) => `
               <div class="mastery-skill-row">
-                <input type="checkbox" class="subtask-checkbox" data-action="toggle-complete" data-id="${sk.id}" ${getItem(sk.id).status === "completed" ? "checked" : ""} />
+                <input type="checkbox" class="subtask-checkbox" data-action="toggle-complete" data-id="${sk.id}" aria-label="${esc(sk.title)}" ${getItem(sk.id).status === "completed" ? "checked" : ""} />
                 <span class="skill-title ${getItem(sk.id).status === "completed" ? "done" : ""}" style="${getItem(sk.id).status === "completed" ? "text-decoration:line-through; color:var(--text-faint);" : ""}">${esc(sk.title)}</span>
                 ${depthBadge(sk.depth)}
               </div>
@@ -947,6 +948,8 @@
 
   function celebrate(phaseTitle) {
     toast(`🎉 Month complete: ${phaseTitle}!`, "celebrate");
+    // Honour the OS "reduce motion" setting: the toast alone is the celebration.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const canvas = document.getElementById("confettiCanvas");
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -1068,21 +1071,22 @@
   // ---------------------------------------------------------
   // Theme
   // ---------------------------------------------------------
-  function applyTheme(theme) {
-    if (theme === "dark" || theme === "light") {
-      document.documentElement.setAttribute("data-theme", theme);
-    } else {
-      document.documentElement.removeAttribute("data-theme");
-    }
-    const isDark = theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    const lightBtn = document.getElementById("themeLightBtn");
-    const darkBtn = document.getElementById("themeDarkBtn");
-    if (lightBtn) lightBtn.classList.toggle("active", !isDark);
-    if (darkBtn) darkBtn.classList.toggle("active", isDark);
+  // The saved choice (light / dark / system) lives in js/theme-boot.js, which
+  // also applies it before first paint. Here we only keep the menu buttons in sync.
+  const THEME_BUTTONS = { light: "themeLightBtn", dark: "themeDarkBtn", system: "themeSystemBtn" };
+
+  function syncThemeButtons() {
+    const mode = window.Theme.get();
+    Object.entries(THEME_BUTTONS).forEach(([value, id]) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.classList.toggle("active", value === mode);
+      btn.setAttribute("aria-pressed", String(value === mode));
+    });
   }
   function initTheme() {
-    const saved = localStorage.getItem(THEME_KEY);
-    applyTheme(saved);
+    window.Theme.onChange(syncThemeButtons);
+    syncThemeButtons();
   }
 
   // ---------------------------------------------------------
@@ -1511,13 +1515,8 @@
     });
 
     // Theme
-    $("themeLightBtn").addEventListener("click", () => {
-      localStorage.setItem(THEME_KEY, "light");
-      applyTheme("light");
-    });
-    $("themeDarkBtn").addEventListener("click", () => {
-      localStorage.setItem(THEME_KEY, "dark");
-      applyTheme("dark");
+    Object.entries(THEME_BUTTONS).forEach(([value, id]) => {
+      $(id).addEventListener("click", () => window.Theme.set(value));
     });
 
     // Search (tab bar, roadmap only)

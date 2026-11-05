@@ -1,0 +1,121 @@
+/* ===========================================================
+   Design tokens — Roadmap Tracker
+   Single source of truth for color, radius, spacing, type.
+   Existing variable names are kept so older rules keep working;
+   new tokens sit beside them. Dark theme is one block, selected
+   by <html data-theme="dark"> (set by js/theme-boot.js).
+   See documentation/design-system.md.
+   =========================================================== */
+
+:root {
+  /* Surfaces */
+  --bg: #f6f7f9;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eef0f4;
+  --bg-brand: #0e1a2f;
+
+  /* Lines */
+  --border: #dde1e8;
+  --border-strong: #b9c0cd;
+
+  /* Text */
+  --text: #141a26;
+  --text-muted: #4a5365;
+  --text-faint: #5f6a7d;
+
+  /* Accent (actions, focus, "you are here") */
+  --accent: #2b50d8;
+  --accent-ink: #ffffff;
+  --accent-soft: #eaf0ff;
+  --accent-hover: #2142b8;
+  --accent-pressed: #1b3699;
+
+  /* Status — colour carries meaning, never decoration */
+  --status-not-started: #5f6a7d;
+  --status-not-started-bg: #eef0f4;
+  --status-in-progress: #9a5b00;
+  --status-in-progress-bg: #fff4df;
+  --status-completed: #17794d;
+  --status-completed-bg: #e6f4ec;
+  --status-blocked: #c0291f;
+  --status-blocked-bg: #fdecea;
+
+  --danger: #c0291f;
+  --danger-soft: #fdecea;
+  --danger-ink: #ffffff;
+
+  --priority-critical: #c0291f;
+  --priority-high: #9a5b00;
+  --priority-medium: #2b50d8;
+
+  /* Elevation: borders by default, shadows only for floating layers */
+  --shadow-sm: none;
+  --shadow-md: 0 4px 16px rgb(14 26 47 / 0.1);
+  --shadow-lg: 0 12px 40px rgb(14 26 47 / 0.18);
+
+  /* Radius, tiered by role */
+  --radius-sm: 6px;   /* controls */
+  --radius-md: 10px;  /* containers */
+  --radius-lg: 14px;  /* overlays */
+
+  /* Spacing (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Focus ring (keyboard only, see base.css) */
+  --focus-ring: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--accent);
+
+  /* Type */
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --bg-elevated: #121b2d;
+  --bg-sunken: #1a2538;
+  --bg-brand: #08111f;
+
+  --border: #26324a;
+  --border-strong: #3a4863;
+
+  --text: #e8ecf4;
+  --text-muted: #a9b3c6;
+  --text-faint: #8591a8;
+
+  --accent: #6c8cff;
+  --accent-ink: #08111f;
+  --accent-soft: #1b2748;
+  --accent-hover: #8aa3ff;
+  --accent-pressed: #a5b8ff;
+
+  --status-not-started: #8591a8;
+  --status-not-started-bg: #1f2a3e;
+  --status-in-progress: #e0a33a;
+  --status-in-progress-bg: #2b2112;
+  --status-completed: #3dbe84;
+  --status-completed-bg: #12281f;
+  --status-blocked: #f0716a;
+  --status-blocked-bg: #2e1816;
+
+  --danger: #f0716a;
+  --danger-soft: #2e1816;
+  --danger-ink: #08111f;
+
+  --priority-critical: #f0716a;
+  --priority-high: #e0a33a;
+  --priority-medium: #8aa3ff;
+
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
+
+  color-scheme: dark;
+}
