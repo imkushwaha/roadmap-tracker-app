@@ -1839,24 +1839,57 @@
     authMode = mode;
     const reg = mode === "register";
     $("authTitle").textContent = reg ? "Create your account" : "Log in";
+    $("authSubtitle").textContent = reg
+      ? "Start with the 10-month AI Engineer roadmap, or build your own."
+      : "Welcome back. Pick up where you left off.";
     $("authSubmit").textContent = reg ? "Create account" : "Log in";
     $("authToggleText").textContent = reg ? "Already have an account?" : "New here?";
     $("authToggle").textContent = reg ? "Log in" : "Create an account";
-    $("authHint").classList.toggle("hidden", !reg);
+    $("authUsernameRule").classList.toggle("hidden", !reg);
+    $("authPwRules").classList.toggle("hidden", !reg);
     $("authPassword").autocomplete = reg ? "new-password" : "current-password";
     $("authError").textContent = "";
     $("authRegisterFields").classList.toggle("hidden", !reg);
     $("authConfirmPasswordField").classList.toggle("hidden", !reg);
-    $("authUsernameLabel").textContent = reg ? "User ID" : "Username";
     $("authUsernameStatus").textContent = "";
     $("authUsernameStatus").className = "auth-field-hint";
     $("authPasswordMatch").textContent = "";
     $("authPasswordMatch").className = "auth-field-hint";
+    setPasswordVisible(false);
+    clearInvalid();
+    updatePasswordRules();
     if (!reg) {
       $("authFirstName").value = "";
       $("authLastName").value = "";
       $("authConfirmPassword").value = "";
     }
+  }
+
+  // ----- Auth form helpers -----
+  const AUTH_FIELDS = ["authFirstName", "authLastName", "authUsername", "authPassword", "authConfirmPassword"];
+
+  function clearInvalid() {
+    AUTH_FIELDS.forEach((id) => $(id).removeAttribute("aria-invalid"));
+  }
+
+  // Show a message in the error banner, mark the field and move focus to it.
+  function failAuth(message, fieldId) {
+    $("authError").textContent = message;
+    if (!fieldId) return;
+    $(fieldId).setAttribute("aria-invalid", "true");
+    $(fieldId).focus();
+  }
+
+  function setPasswordVisible(visible) {
+    ["authPassword", "authConfirmPassword"].forEach((id) => { $(id).type = visible ? "text" : "password"; });
+    const btn = $("authPasswordToggle");
+    btn.setAttribute("aria-pressed", String(visible));
+    btn.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+    btn.innerHTML = window.Icons.svg(visible ? "eye-off" : "eye", { size: 18 });
+  }
+
+  function updatePasswordRules() {
+    $("authRuleLength").classList.toggle("met", $("authPassword").value.length >= 8);
   }
 
   function showAuth(mode, notice, opts) {
@@ -1901,38 +1934,41 @@
     ev.preventDefault();
     const username = $("authUsername").value.trim();
     const password = $("authPassword").value;
-    const err = $("authError");
-    err.textContent = "";
-    if (!username || !password) { err.textContent = "Enter a username and password."; return; }
-    if (authMode === "register") {
-      const firstName = $("authFirstName").value.trim();
-      const lastName  = $("authLastName").value.trim();
-      const confirmPassword = $("authConfirmPassword").value;
-      if (!firstName) { err.textContent = "Please enter your first name."; return; }
-      if (!lastName)  { err.textContent = "Please enter your last name."; return; }
-      if (!/^[A-Za-z0-9_-]{3,32}$/.test(username)) { err.textContent = "User ID must be 3–32 characters: letters, numbers, _ or -."; return; }
-      if (password.length < 8) { err.textContent = "Password must be at least 8 characters."; return; }
-      if (password !== confirmPassword) { err.textContent = "Passwords do not match."; return; }
+    $("authError").textContent = "";
+    clearInvalid();
+    const register = authMode === "register";
+    const firstName = $("authFirstName").value.trim();
+    const lastName = $("authLastName").value.trim();
+
+    if (register && !firstName) { failAuth("Enter your first name.", "authFirstName"); return; }
+    if (register && !lastName) { failAuth("Enter your last name.", "authLastName"); return; }
+    if (!username) { failAuth(register ? "Choose a username." : "Enter your username.", "authUsername"); return; }
+    if (register && !/^[A-Za-z0-9_-]{3,32}$/.test(username)) {
+      failAuth("Username must be 3 to 32 characters: letters, numbers, _ or -.", "authUsername"); return;
     }
+    if (!password) { failAuth(register ? "Choose a password." : "Enter your password.", "authPassword"); return; }
+    if (register && password.length < 8) { failAuth("Password must be at least 8 characters.", "authPassword"); return; }
+    if (register && password !== $("authConfirmPassword").value) {
+      failAuth("Passwords don't match.", "authConfirmPassword"); return;
+    }
+
     const btn = $("authSubmit");
     btn.disabled = true;
+    btn.classList.add("is-loading");
     try {
-      let res;
-      if (authMode === "register") {
-        const firstName = $("authFirstName").value.trim();
-        const lastName  = $("authLastName").value.trim();
-        res = await window.AuthApi.register(firstName, lastName, username, password);
-      } else {
-        res = await window.AuthApi.login(username, password);
-      }
+      const res = register
+        ? await window.AuthApi.register(firstName, lastName, username, password)
+        : await window.AuthApi.login(username, password);
       $("authPassword").value = "";
       $("authConfirmPassword").value = "";
       session.expiredFor = null;
       enterDashboard(res.user);
+      if (register) toast("Account created. Your AI Engineer roadmap is ready.", "success");
     } catch (e) {
-      err.textContent = e.message;
+      $("authError").textContent = e.message;
     } finally {
       btn.disabled = false;
+      btn.classList.remove("is-loading");
     }
   }
 
@@ -2300,6 +2336,19 @@
     return function (...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
   }
 
+  // Decorative sample on the login brand panel (no real data).
+  function renderAuthPanelStrip() {
+    const sample = [
+      [100, 0, 0], [100, 0, 0], [62, 14, 0], [24, 10, 0], [0, 0, 0],
+      [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+    ];
+    const labels = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+    const months = sample.map(([completed, inProgress, blocked], i) => ({
+      label: labels[i], title: `Month ${i + 1}`, total: 100, completed, inProgress, blocked, current: i === 2,
+    }));
+    $("authPanelStrip").innerHTML = window.MonthStrip.html(months, { size: "lg", labels: true });
+  }
+
   function wireSyncEvents() {
     $("authForm").addEventListener("submit", submitAuth);
     $("authToggle").addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
@@ -2315,12 +2364,12 @@
         el.className = "auth-field-hint";
         return;
       }
-      el.textContent = "Checking…";
+      el.textContent = "Checking availability…";
       el.className = "auth-field-hint checking";
       try {
         const r = await window.AuthApi.checkUsername(val);
         if ($("authUsername").value.trim() !== val) return; // stale
-        el.textContent = r.available ? "✓ Available" : "✗ Already taken";
+        el.textContent = r.available ? "Username is available." : "That username is taken.";
         el.className = "auth-field-hint " + (r.available ? "available" : "taken");
       } catch { el.textContent = ""; el.className = "auth-field-hint"; }
     }, 400));
@@ -2333,10 +2382,24 @@
       const el  = $("authPasswordMatch");
       if (!pw || !cpw) { el.textContent = ""; el.className = "auth-field-hint"; return; }
       const match = pw === cpw;
-      el.textContent = match ? "✓ Passwords match" : "✗ Passwords do not match";
+      el.textContent = match ? "Passwords match." : "Passwords don't match.";
       el.className = "auth-field-hint " + (match ? "match" : "mismatch");
     }
-    $("authPassword").addEventListener("input", updatePasswordMatch);
+    $("authPassword").addEventListener("input", () => { updatePasswordMatch(); updatePasswordRules(); });
+    $("authPasswordToggle").addEventListener("click", () => {
+      setPasswordVisible($("authPassword").type === "password");
+    });
+    // Caps Lock hint on the password fields
+    ["authPassword", "authConfirmPassword"].forEach((id) => {
+      const field = $(id);
+      const check = (e) => {
+        if (typeof e.getModifierState !== "function") return;
+        $("authCapsHint").classList.toggle("hidden", !e.getModifierState("CapsLock"));
+      };
+      field.addEventListener("keydown", check);
+      field.addEventListener("keyup", check);
+      field.addEventListener("blur", () => $("authCapsHint").classList.add("hidden"));
+    });
     $("authConfirmPassword").addEventListener("input", updatePasswordMatch);
     $("logoutBtn").addEventListener("click", logout);
     $("backToDashboardBtn").addEventListener("click", backToDashboard);
@@ -2373,6 +2436,7 @@
     const footerYear = document.getElementById("authFooterYear");
     if (footerYear) footerYear.textContent = new Date().getFullYear();
     initTheme();
+    renderAuthPanelStrip();
     wireEvents();
     wireSyncEvents();
     boot();

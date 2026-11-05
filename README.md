@@ -41,6 +41,7 @@ A single-page web application for tracking progress through structured roadmaps.
 - **Create new roadmap** — give it a name, an optional description and the month Month 1 starts in; it opens as an empty roadmap that you build with the in-roadmap editors (Month → Section, a week or a theme → Topic → Tasks). An empty roadmap shows an onboarding card with an **Add your first month** button
 - Up to **20 roadmaps** per account
 - **Create roadmap with AI** is shown as *Coming soon*
+- **Log in / Create account** — split-screen layout (brand panel plus form), show/hide password, Caps Lock hint, live username-availability and password-requirement checks, errors announced to screen readers
 - **Appearance** — Light, Dark or **System** (follows your operating system live); the choice is remembered per browser and applied before the page paints, so there is no flash
 
 Views inside a roadmap:
@@ -162,7 +163,8 @@ roadmap-dashboard/
 ├── css/
 │   ├── tokens.css                Design tokens: colour, radius, spacing (light + dark)
 │   ├── base.css                  Fonts, reset, typography, focus ring, reduced motion
-│   ├── components.css            Buttons, fields, chips, modal, toasts, …
+│   ├── components.css            Buttons, fields, chips, modal, toasts, Month Strip, …
+│   ├── auth.css                  Log in / Create account screens
 │   └── styles.css                Layout + per-view rules (shrinking during the redesign)
 ├── fonts/                        IBM Plex Sans (self-hosted, SIL OFL)
 ├── img/                          logo.svg, favicon.svg
@@ -170,6 +172,7 @@ roadmap-dashboard/
 ├── js/
 │   ├── theme-boot.js             Light / Dark / System, applied before first paint (window.Theme)
 │   ├── icons.js                  Inline SVG icon set (window.Icons)
+│   ├── month-strip.js            Month Strip component (window.MonthStrip)
 │   ├── app.js                    UI state, rendering, dashboard, autosave, auth
 │   ├── api.js                    HTTP client (AuthApi, RoadmapApi)
 │   └── progress-schema.js        Progress data validator (UMD — browser + server)

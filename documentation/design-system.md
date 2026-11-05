@@ -10,14 +10,16 @@ The visual language of Roadmap Tracker: design tokens, typography, components, t
 |---|---|
 | `css/tokens.css` | **Single source** of color, radius, spacing, type tokens. Light on `:root`, dark on `:root[data-theme="dark"]` |
 | `css/base.css` | `@font-face` (self-hosted IBM Plex Sans), reset, body type, focus ring, reduced-motion rules |
-| `css/components.css` | Buttons, form fields, progress bar, badges, status chips, modal, toasts, skeleton, avatar, mini button |
+| `css/components.css` | Buttons, form fields, progress bar, badges, status chips, modal, toasts, skeleton, avatar, mini button, **Month Strip** |
+| `css/auth.css` | Log in / create-account screens (split layout, brand panel, field hints, footer) |
 | `css/styles.css` | Layout and per-view rules not yet moved (shrinks each phase; see "Redesign status") |
 | `js/theme-boot.js` | Applies Light / Dark / System **before first paint**; exposes `window.Theme` |
 | `js/icons.js` | Inline SVG icon set, `Icons.svg(name, { size, label })` (Lucide, ISC licence) |
+| `js/month-strip.js` | `MonthStrip.html(months, { size, labels, animate })` |
 | `fonts/` | IBM Plex Sans 400 / 500 / 600, Latin subset, plus the SIL OFL licence |
 | `img/` | `logo.svg` (brand mark) and `favicon.svg` |
 
-Load order in `index.html`: `theme-boot.js` (blocking, in `<head>`) → `tokens.css` → `base.css` → `components.css` → `styles.css`; scripts at the end: `icons.js`, `data/roadmap.js`, `progress-schema.js`, `api.js`, `app.js`.
+Load order in `index.html`: `theme-boot.js` (blocking, in `<head>`) → `tokens.css` → `base.css` → `components.css` → `auth.css` → `styles.css`; scripts at the end: `icons.js`, `month-strip.js`, `data/roadmap.js`, `progress-schema.js`, `api.js`, `app.js`.
 
 ## Tokens
 
@@ -54,6 +56,16 @@ Theme.set("dark");  // save + apply + notify
 Theme.onChange((mode, resolved) => { /* … */ });
 ```
 
+## Month Strip
+
+One segment per month; each segment is a stacked bar of that month's tasks (completed, in progress, blocked, remaining). The current month gets an accent marker. More than 12 months collapses to one continuous bar; zero months shows a dashed empty strip. Output is escaped HTML with `role="img"` and a text summary (for example "152 of 849 tasks complete across 10 months"). Sizes: `"sm"` (4px), `"md"` (8px), `"lg"` (14px, optionally with month labels). `animate: true` plays the single entrance animation (segments fill left to right over 600ms; disabled by reduced motion).
+
+```js
+MonthStrip.html([
+  { label: "Oct", title: "Month 1: Foundations", total: 100, completed: 60, inProgress: 10, blocked: 0, current: true },
+], { size: "md", labels: false, animate: false });
+```
+
 ## Motion and accessibility rules
 
 - Hover and press: color only, 120ms. Menus, dialogs and toasts: 160ms fade plus a 4px shift, only when the user opens them.
@@ -72,7 +84,7 @@ Theme.onChange((mode, resolved) => { /* … */ });
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Tokens, fonts, theme (incl. System), icons, base components, reduced motion | Done |
-| 1 | Log in and create-account screens | Not started |
+| 1 | Log in and create-account screens | Done |
 | 2 | App shell, Home, `stats` API | Not started |
 | 3 | Home flows (New roadmap dialog, filters, list view) | Not started |
 | 4 | Roadmap views | Not started |

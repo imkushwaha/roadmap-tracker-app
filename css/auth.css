@@ -1,0 +1,117 @@
+/* ===========================================================
+   Auth screens (log in, create account, status panel).
+   Desktop: split screen, brand panel + form. Under 1024px the brand
+   panel is dropped and a compact logo sits above the form.
+   =========================================================== */
+
+.auth-screen { position: fixed; inset: 0; z-index: 500; background: var(--bg); overflow-y: auto; }
+.auth-layout { min-height: 100%; display: grid; grid-template-columns: 1fr; }
+
+/* ---------------- Brand panel (desktop only, decorative) ---------------- */
+.auth-panel { display: none; }
+@media (min-width: 1024px) {
+  .auth-layout { grid-template-columns: minmax(480px, 45%) 1fr; }
+  .auth-panel {
+    /* The panel is always dark, in both themes: pin the status colours to
+       their dark-theme values so the strip stays legible on navy. */
+    --status-completed: #3dbe84; --status-in-progress: #e0a33a; --status-blocked: #f0716a;
+    display: flex; flex-direction: column; justify-content: space-between; gap: 48px;
+    padding: 48px; background: var(--bg-brand); color: #fff;
+    border-right: 1px solid rgb(255 255 255 / 0.08);
+  }
+}
+.auth-panel-top { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+.auth-panel-top .brand-mark { width: 28px; height: 28px; box-shadow: 0 0 0 1px rgb(255 255 255 / 0.18); }
+.auth-panel-title { margin: 0 0 16px; font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -0.02em; max-width: 16em; }
+.auth-panel-text { margin: 0 0 32px; font-size: 15px; line-height: 24px; color: rgb(255 255 255 / 0.74); max-width: 30em; }
+.auth-panel-demo {
+  padding: 20px; border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.05); border: 1px solid rgb(255 255 255 / 0.12); max-width: 520px;
+}
+.auth-panel-demo-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; font-size: 14px; font-weight: 500; }
+.auth-panel-demo-head span { font-size: 12px; font-weight: 400; color: rgb(255 255 255 / 0.6); }
+.auth-panel-demo .strip-seg { background: rgb(255 255 255 / 0.1); box-shadow: none; }
+.auth-panel-demo .strip-label { color: rgb(255 255 255 / 0.6); }
+.auth-panel-demo .strip-col.is-current .strip-label { color: #fff; }
+.auth-panel-demo .strip-col.is-current::after { background: #6c8cff; }
+.auth-panel-demo-foot { margin: 16px 0 0; font-size: 13px; color: rgb(255 255 255 / 0.7); font-variant-numeric: tabular-nums; }
+.auth-panel-foot { margin: 0; font-size: 13px; color: rgb(255 255 255 / 0.55); }
+
+/* ---------------- Form column ---------------- */
+.auth-main { display: flex; flex-direction: column; min-height: 100vh; padding: 24px 24px 0; }
+.auth-main-inner {
+  flex: 1; display: flex; flex-direction: column; justify-content: center;
+  width: 100%; max-width: 400px; margin: 0 auto; padding: 24px 0;
+}
+.auth-card { width: 100%; }
+.auth-brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 24px; }
+.auth-brand .brand-mark { width: 24px; height: 24px; border-radius: 6px; }
+@media (min-width: 1024px) { .auth-brand-compact { display: none; } }
+
+.auth-card h2 { margin: 0 0 4px; font-size: 24px; line-height: 32px; letter-spacing: -0.01em; }
+.auth-subtitle { margin: 0 0 24px; font-size: 14px; color: var(--text-muted); }
+
+.auth-notice {
+  font-size: 13px; color: var(--text-muted); background: var(--bg-sunken);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin: 0 0 16px; line-height: 1.45;
+}
+
+/* Error banner stays in the DOM (so assistive tech announces it) but takes no space when empty. */
+.auth-error {
+  font-size: 13px; line-height: 1.45; color: var(--status-blocked);
+  background: var(--status-blocked-bg); border: 1px solid var(--status-blocked);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin: 0 0 16px;
+}
+.auth-error:empty { padding: 0; border: 0; margin: 0; background: none; }
+
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 479px) { .field-row { grid-template-columns: 1fr; gap: 0; } }
+
+.auth-submit { width: 100%; margin-top: 8px; }
+.auth-toggle { text-align: center; font-size: 14px; color: var(--text-muted); margin: 20px 0 0; }
+#authDownload { display: block; margin: 16px auto 0; font-size: 13px; }
+
+/* Show / hide password button sits inside the field */
+.input-affix { position: relative; }
+.field .input-affix input:not([type="checkbox"]):not([type="radio"]) { padding-right: 44px; }
+.input-affix-btn {
+  position: absolute; top: 4px; right: 4px; width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-faint);
+}
+.input-affix-btn:hover { background: var(--bg-sunken); color: var(--text); }
+
+/* Hints under fields. State classes are set from app.js. */
+.auth-field-hint, .field-hint { font-size: 12px; line-height: 16px; margin: 6px 0 0; color: var(--text-faint); }
+.auth-field-hint:empty { margin: 0; }
+.auth-field-hint.checking { font-style: italic; }
+.auth-field-hint.available, .auth-field-hint.match { color: var(--status-completed); }
+.auth-field-hint.taken, .auth-field-hint.mismatch { color: var(--status-blocked); }
+.auth-field-hint.available::before, .auth-field-hint.match::before,
+.auth-field-hint.taken::before, .auth-field-hint.mismatch::before,
+.rules li::before {
+  content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px;
+  background: currentColor; -webkit-mask: var(--icon-x) center / contain no-repeat; mask: var(--icon-x) center / contain no-repeat;
+}
+.auth-field-hint.available::before, .auth-field-hint.match::before, .rules li.met::before {
+  -webkit-mask-image: var(--icon-check); mask-image: var(--icon-check);
+}
+:root {
+  --icon-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  --icon-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E");
+}
+
+/* Live password requirements (sign-up) */
+.rules { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12px; line-height: 18px; color: var(--text-faint); }
+.rules li.met { color: var(--status-completed); }
+.rules li:not(.met)::before { -webkit-mask-image: none; mask-image: none; background: none; border: 1.5px solid currentColor; border-radius: 50%; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px; }
+
+/* ---------------- Footer: one quiet line ---------------- */
+.auth-footer { width: 100%; max-width: 640px; margin: 0 auto; padding: 16px 0 20px; font-size: 12px; line-height: 18px; color: var(--text-faint); text-align: center; }
+.auth-footer p { margin: 0; }
+.auth-footer a { color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; }
+.auth-footer a:hover { color: var(--accent); }
+.auth-about { margin-top: 6px; }
+.auth-about summary { display: inline; cursor: pointer; color: var(--text-muted); }
+.auth-about summary:hover { color: var(--accent); }
+.auth-about p { margin-top: 6px; }

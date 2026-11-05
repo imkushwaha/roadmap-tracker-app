@@ -8,7 +8,8 @@ roadmap-dashboard/
 ├── css/
 │   ├── tokens.css                 ← Design tokens (light + dark) — see design-system.md
 │   ├── base.css                   ← Fonts, reset, focus ring, reduced motion
-│   ├── components.css             ← Buttons, fields, chips, modal, toasts
+│   ├── components.css             ← Buttons, fields, chips, modal, toasts, Month Strip
+│   ├── auth.css                   ← Log in / Create account screens
 │   └── styles.css                 ← Layout + per-view styles (shrinking)
 ├── fonts/  img/                   ← Self-hosted IBM Plex Sans; logo and favicon
 ├── js/
