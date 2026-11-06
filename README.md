@@ -36,14 +36,16 @@ A single-page web application for tracking progress through structured roadmaps.
 
 **Roadmap dashboard** — after login you land on "Your roadmaps":
 - Every account is seeded with the **AI Engineer Roadmap**; **Open** it to use the views below, with a back arrow to return to the dashboard
-- **Delete** a roadmap (and its progress) from the card's **⋯** menu — always behind a confirmation dialog
+- **Delete** a roadmap (and its progress) from the card's **⋯** menu — always behind a confirmation dialog; a roadmap that has progress also asks you to **type its name**
 - Each card shows a **Month Strip** (one segment per month, filled by completed / in-progress / blocked tasks, current month marked), percent complete, task counts and the current month; a summary bar totals tasks done across roadmaps
 - **App shell** — a left sidebar (roadmap switcher on Home; view navigation inside a roadmap; collapsible, and a slide-in drawer on small screens) and a top bar with breadcrumb, search, save status, roadmap settings and the account menu
 - **Links that work** — `#/` is Home and `#/r/<id>/<view>` is a roadmap view, so refresh, Back/Forward and bookmarks work; leaving a roadmap with unsaved edits still asks first
 - **Restore** the AI Engineer Roadmap (fresh progress) if you deleted it
 - **Create new roadmap** — give it a name, an optional description and the month Month 1 starts in; it opens as an empty roadmap that you build with the in-roadmap editors (Month → Section, a week or a theme → Topic → Tasks). An empty roadmap shows an onboarding card with an **Add your first month** button
 - Up to **20 roadmaps** per account
-- **Create roadmap with AI** is shown as *Coming soon*
+- **New roadmap** dialog — choose *Blank roadmap* (name, description with a character counter, start month), restore the *AI Engineer roadmap* when you no longer have it, or see the disabled *Describe a goal (AI)* option marked **Soon**
+- **Find your roadmaps** — with two or more roadmaps, Home adds search (name and description), status filters with counts (All, In progress, Not started, Completed) and sorting (Recent activity, Name, Progress); switch between a **grid** and a **list** view (columns sort; your view and sort are remembered)
+- **Right-hand panel** — *Current focus* (the current month, and this week's section for the built-in roadmap, of your most recently used roadmap) and a dismissible *Getting started* checklist
 - **Log in / Create account** — split-screen layout (brand panel plus form), show/hide password, Caps Lock hint, live username-availability and password-requirement checks, errors announced to screen readers
 - **Appearance** — Light, Dark or **System** (follows your operating system live); the choice is remembered per browser and applied before the page paints, so there is no flash
 

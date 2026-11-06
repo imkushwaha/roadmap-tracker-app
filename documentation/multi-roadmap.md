@@ -117,6 +117,8 @@ Options left for a later phase if wanted: a creation wizard that pre-fills `prog
 | Per-roadmap UI state | `resetViewState()` and `syncTabs()`; `renderBlankRoadmap()` for the empty onboarding card |
 | Styles | `css/home.css` (cards, summary bar), `css/shell.css` (sidebar, top bar), `css/styles.css` ("Custom roadmaps") |
 | URLs | `parseRoute` / `navigate` / `replaceRoute` / `onPopState` in `js/app.js`: `#/` and `#/r/<id>/<view>`; Back and Forward are handled, and leaving a roadmap with unsaved edits asks first |
+| Home controls | `homeState` (view, sort, filter, search) in `js/app.js`; `renderHomeResults()` redraws only the results, so typing in search keeps focus. View and sort persist under `roadmap-dashboard:home`; the dismissed *Getting started* card under `roadmap-dashboard:getting-started` |
+| Dialogs | `openCreateRoadmapModal` (Blank / AI Engineer / AI soon), `confirmDeleteRoadmap` (typed name when `roadmapHasProgress`), shared `showModal` / `closeModal` (focus returns to the opener; Escape closes; Tab stays inside) |
 
 Session state: `session.roadmapId` is `null` on the dashboard and the open roadmap's id otherwise. Autosave only runs while a roadmap is open. `settleUnsavedChanges` is shared by "back to dashboard" and "log out": it flushes pending edits and asks before discarding anything that could not be saved.
 

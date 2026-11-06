@@ -56,6 +56,7 @@ IBM Plex Sans, self-hosted (`fonts/`), with a system-font fallback. Body 14px / 
 Theme.get();        // "light" | "dark" | "system"  (saved choice)
 Theme.resolved();   // "light" | "dark"             (what is on screen)
 Theme.set("dark");  // save + apply + notify
+Theme.isSaved();    // true once the user has explicitly chosen (used by "Getting started")
 Theme.onChange((mode, resolved) => { /* … */ });
 ```
 
@@ -68,6 +69,14 @@ MonthStrip.html([
   { label: "Oct", title: "Month 1: Foundations", total: 100, completed: 60, inProgress: 10, blocked: 0, current: true },
 ], { size: "md", labels: false, animate: false });
 ```
+
+## Home flows (Phase 3)
+
+- **Option rows** (`.option-row`, in the New roadmap dialog): a bordered radio card; `.is-selected` (accent border and soft fill) and `.is-disabled` (sunken background, muted text, no opacity so contrast holds). A `.badge-soon` marks features that are not available yet.
+- **Dialog behaviour** (all dialogs): `role="dialog"`, named by the first `<h2>` (`#modalTitle`); Escape closes; Tab/Shift+Tab stay inside; dialogs opened with `showModal()` return focus to what opened them.
+- **Typed confirmation** for destructive actions on real work: the confirm button stays disabled until the exact name is typed (case-sensitive); focus starts on Cancel.
+- **Responsive tables** use container queries on `.home-main`, so columns hide according to the space next to the rail rather than the window width; below 560px a row becomes a small card.
+- **Filter chips** reuse `.chip-filter` with `aria-pressed` and a `.chip-count`; the view toggle uses `.view-toggle`/`.view-btn`.
 
 ## Motion and accessibility rules
 
@@ -93,6 +102,6 @@ MonthStrip.html([
 | 0 | Tokens, fonts, theme (incl. System), icons, base components, reduced motion | Done |
 | 1 | Log in and create-account screens | Done |
 | 2 | App shell, Home, `stats` API, hash routes | Done |
-| 3 | Home flows (New roadmap dialog, filters, list view) | Not started |
+| 3 | Home flows (New roadmap dialog, filters, list view, right rail, typed-name delete) | Done |
 | 4 | Roadmap views | Not started |
 | 5 | Hardening, remove legacy CSS | Not started |

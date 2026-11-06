@@ -58,6 +58,9 @@
 
   window.Theme = {
     get: read,
+    isSaved() {
+      try { return MODES.includes(localStorage.getItem(KEY)); } catch { return false; }
+    },
     resolved: () => resolve(read()),
     set,
     onChange(fn) { listeners.push(fn); },
