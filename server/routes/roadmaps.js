@@ -15,6 +15,7 @@ const { validateProgress } = require("../../js/progress-schema");
 const { BUILTIN_AI_ENGINEER } = require("../roadmaps/builtin");
 const { createRoadmapRepository } = require("../roadmaps/repository");
 const { emptyProgress } = require("../roadmaps/progress");
+const { createStatsService } = require("../roadmaps/stats");
 const {
   CUSTOM_SOURCE,
   MAX_ROADMAPS_PER_USER,
@@ -25,6 +26,7 @@ const {
  * @typedef {object} RoadmapsRouterOptions
  * @property {import('@libsql/client').Client} db
  * @property {import('express').RequestHandler} requireAuth - Middleware that sets `req.user`.
+ * @property {object} [builtinData] - Parsed data/roadmap.json (defaults to the bundled file).
  */
 
 /**
@@ -41,9 +43,10 @@ function parseId(raw) {
  * @param {RoadmapsRouterOptions} options
  * @returns {import('express').Router}
  */
-function createRoadmapsRouter({ db, requireAuth }) {
+function createRoadmapsRouter({ db, requireAuth, builtinData = require("../../data/roadmap.json") }) {
   const router = express.Router();
   const repo = createRoadmapRepository(db);
+  const stats = createStatsService({ builtinData });
   router.use(requireAuth);
 
   async function findOwnedFromParams(req) {
@@ -71,8 +74,18 @@ function createRoadmapsRouter({ db, requireAuth }) {
     res.status(201).json({ roadmap: await repo.findOwned(req.user.id, id) });
   }
 
+  // Each roadmap carries `stats` (totals and a per-month breakdown) so the Home
+  // screen can show progress without loading every roadmap's full progress.
+  // The raw progress JSON is never included.
   router.get("/", async (req, res) => {
-    res.json({ roadmaps: await repo.listForUser(req.user.id) });
+    const rows = await repo.listWithProgress(req.user.id);
+    const roadmaps = rows.map(({ progressData, progressVersion, ...roadmap }) => ({
+      ...roadmap,
+      stats: stats.forRoadmap({
+        id: roadmap.id, source: roadmap.source, progressData, progressVersion,
+      }),
+    }));
+    res.json({ roadmaps });
   });
 
   router.post("/", async (req, res) => {

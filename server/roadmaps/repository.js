@@ -50,6 +50,29 @@ function createRoadmapRepository(db) {
     }));
   }
 
+  /**
+   * Like listForUser, plus each roadmap's stored progress (raw JSON text and
+   * version) so the caller can summarise it. Callers must not expose the raw
+   * progress to clients.
+   * @returns {Promise<Array<RoadmapRow & { progressData: string | null, progressVersion: number | null }>>}
+   */
+  async function listWithProgress(userId) {
+    const result = await db.execute({
+      sql: `SELECT r.id, r.name, r.description, r.source, r.created_at,
+                   p.updated_at AS last_activity_at, p.data AS progress_data, p.version AS progress_version
+            FROM roadmaps r LEFT JOIN roadmap_progress p ON p.roadmap_id = r.id
+            WHERE r.user_id = ?
+            ORDER BY r.created_at, r.id`,
+      args: [userId],
+    });
+    return result.rows.map((row) => ({
+      ...toRoadmap(row),
+      lastActivityAt: row.last_activity_at == null ? null : String(row.last_activity_at),
+      progressData: row.progress_data == null ? null : String(row.progress_data),
+      progressVersion: row.progress_version == null ? null : Number(row.progress_version),
+    }));
+  }
+
   /** @returns {Promise<RoadmapRow | undefined>} */
   async function findOwned(userId, roadmapId) {
     const result = await db.execute({
@@ -140,7 +163,7 @@ function createRoadmapRepository(db) {
   }
 
   return {
-    listForUser, findOwned, countForUser, hasSource, insert, remove, getProgress, saveProgress,
+    listForUser, listWithProgress, findOwned, countForUser, hasSource, insert, remove, getProgress, saveProgress,
   };
 }
 

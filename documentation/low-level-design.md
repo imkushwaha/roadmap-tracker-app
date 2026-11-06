@@ -241,6 +241,7 @@ Shared by registration (`routes/auth.js`) and the restore endpoint (`routes/road
 
 | Method | Statement(s) | Returns |
 |--------|--------------|---------|
+| `listWithProgress(userId)` | Same join as `listForUser` plus `p.data` and `p.version`; used only by the list route to build `stats`; the raw data is stripped before responding | `RoadmapRow[]` with `progressData`, `progressVersion` |
 | `listForUser(userId)` | `SELECT r.id, r.name, r.description, r.source, r.created_at, p.updated_at AS last_activity_at FROM roadmaps r LEFT JOIN roadmap_progress p ON p.roadmap_id = r.id WHERE r.user_id = ? ORDER BY r.created_at, r.id` | `RoadmapRow[]`, each with `lastActivityAt: string \| null` |
 | `findOwned(userId, roadmapId)` | `SELECT … FROM roadmaps WHERE id = ? AND user_id = ?` | `RoadmapRow` or `undefined` |
 | `countForUser(userId)` | `SELECT COUNT(*) AS n FROM roadmaps WHERE user_id = ?` | number |

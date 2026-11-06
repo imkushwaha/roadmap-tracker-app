@@ -168,12 +168,13 @@ The old `/api/data` endpoints no longer exist; their behaviour moved to `/api/ro
 | `source` | string | `"builtin_ai_engineer"` (static AI Engineer curriculum) or `"custom"` (user-built, starts empty) |
 | `createdAt` | string | ISO-8601 UTC |
 | `lastActivityAt` | string \| null | Only in the list response: when progress was last saved; `null` if never |
+| `stats` | object \| null | Only in the list response: progress summary (below). `null` only if the stored progress cannot be read |
 
 ---
 
 ### GET `/api/roadmaps`
 
-Lists the user's roadmaps, oldest first. Returns metadata only (no progress data).
+Lists the user's roadmaps, oldest first. Returns metadata and a progress **summary** (`stats`); the progress data itself is never included.
 
 **Success — 200 OK**
 ```json
@@ -185,12 +186,31 @@ Lists the user's roadmaps, oldest first. Returns metadata only (no progress data
       "description": "Tier-1 Production AI Engineer — 10-Month Execution Tracker",
       "source": "builtin_ai_engineer",
       "createdAt": "2026-10-29T10:33:41.960Z",
-      "lastActivityAt": null
+      "lastActivityAt": null,
+      "stats": {
+        "total": 849, "completed": 0, "inProgress": 0, "blocked": 0,
+        "completedLast7Days": 0, "startMonth": "2026-10",
+        "months": [
+          { "number": 1, "id": "month-1", "title": "Software Engineering Upgrade",
+            "total": 180, "completed": 0, "inProgress": 0, "blocked": 0 }
+        ]
+      }
     }
   ]
 }
 ```
 A user who deleted every roadmap gets `{ "roadmaps": [] }`.
+
+**`stats` fields** (computed by `js/roadmap-stats.js`):
+
+| Field | Meaning |
+|---|---|
+| `total`, `completed`, `inProgress`, `blocked` | Item counts across the whole roadmap. Every task and every month deliverable counts once; user-added topics count in the month that owns their section; an id with no saved status is "not started" |
+| `completedLast7Days` | Items whose stored `completedAt` is within the last 7 days |
+| `startMonth` | Effective Month 1 (`"YYYY-MM"`): the saved `settings.startMonth`, else the roadmap's authored start; `null` for a custom roadmap that has none. The client works out the current month from this in local time |
+| `months[]` | One entry per month (built-in months, then user-added months) with `number`, `id`, `title` and the same four counts |
+
+Results are cached in memory by roadmap id and saved `version` (so a save always invalidates), with a 10-minute TTL and a 500-entry cap.
 
 ---
 

@@ -205,7 +205,7 @@ registration and the restore endpoint.
 ### `server/routes/roadmaps.js`
 HTTP only — it parses/validates and delegates all SQL to the repository. `router.use(requireAuth)`; every
 query is scoped to `req.user.id`, and a malformed, unknown or foreign `:id` is a 404.
-- `GET /api/roadmaps` — the user's roadmaps with `lastActivityAt` (the progress row's `updated_at`, or `null`)
+- `GET /api/roadmaps` — the user's roadmaps with `lastActivityAt` (the progress row's `updated_at`, or `null`) and `stats` (progress summary from `js/roadmap-stats.js`, cached by roadmap id + version in `server/roadmaps/stats.js`)
 - `POST /api/roadmaps` — two modes. **Custom** (`source` omitted or `"custom"`): `{ name, description?, startMonth? }` →
   201 `{ roadmap }`; with a `startMonth` the first progress row (empty progress + `settings.startMonth`, version 1) is
   written in the same transaction; 400 on invalid input; 409 at the 20-roadmap cap. **Restore**

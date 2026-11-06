@@ -12,14 +12,17 @@ The visual language of Roadmap Tracker: design tokens, typography, components, t
 | `css/base.css` | `@font-face` (self-hosted IBM Plex Sans), reset, body type, focus ring, reduced-motion rules |
 | `css/components.css` | Buttons, form fields, progress bar, badges, status chips, modal, toasts, skeleton, avatar, mini button, **Month Strip** |
 | `css/auth.css` | Log in / create-account screens (split layout, brand panel, field hints, footer) |
+| `css/shell.css` | App shell: sidebar (expanded, collapsed, drawer), top bar, breadcrumb, save-status chip, About dialog bits |
+| `css/home.css` | Home: page header, summary bar, roadmap cards, per-card menu, empty state, skeleton |
 | `css/styles.css` | Layout and per-view rules not yet moved (shrinks each phase; see "Redesign status") |
 | `js/theme-boot.js` | Applies Light / Dark / System **before first paint**; exposes `window.Theme` |
 | `js/icons.js` | Inline SVG icon set, `Icons.svg(name, { size, label })` (Lucide, ISC licence) |
 | `js/month-strip.js` | `MonthStrip.html(months, { size, labels, animate })` |
+| `js/roadmap-stats.js` | Shared (UMD) progress summaries; used by the server for `stats` on the roadmap list |
 | `fonts/` | IBM Plex Sans 400 / 500 / 600, Latin subset, plus the SIL OFL licence |
 | `img/` | `logo.svg` (brand mark) and `favicon.svg` |
 
-Load order in `index.html`: `theme-boot.js` (blocking, in `<head>`) → `tokens.css` → `base.css` → `components.css` → `auth.css` → `styles.css`; scripts at the end: `icons.js`, `month-strip.js`, `data/roadmap.js`, `progress-schema.js`, `api.js`, `app.js`.
+Load order in `index.html`: `theme-boot.js` (blocking, in `<head>`) → `tokens.css` → `base.css` → `components.css` → `auth.css` → `shell.css` → `home.css` → `styles.css`; scripts at the end: `icons.js`, `month-strip.js`, `data/roadmap.js`, `progress-schema.js`, `api.js`, `app.js`.
 
 ## Tokens
 
@@ -79,13 +82,17 @@ MonthStrip.html([
 
 `helmet()` default CSP applies: scripts from `'self'` only (no inline scripts, no `eval`), styles from `'self'` and inline styles, fonts and images from `'self'`/`data:`. New assets must be same-origin files served by the allowlist in `server/app.js` (`/css`, `/js`, `/fonts`, `/img`, `/data/roadmap.js`).
 
+## App shell
+
+`#appShell` holds the sidebar and the page. `data-context="home|roadmap"` switches what is shown: Home shows the roadmap switcher; a roadmap shows "All roadmaps", the roadmap card with a live Month Strip, and the seven views (buttons with `data-view`, so the existing view switching is unchanged). Roadmap-only controls (search, save status, roadmap settings) carry the `roadmap-only` class and are hidden on Home. The account menu is a single element in the top bar. Below 1024px the sidebar is a drawer (menu button, scrim, Escape to close); on desktop it can be collapsed to an icon rail, remembered under `roadmap-dashboard:sidebar`.
+
 ## Redesign status
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Tokens, fonts, theme (incl. System), icons, base components, reduced motion | Done |
 | 1 | Log in and create-account screens | Done |
-| 2 | App shell, Home, `stats` API | Not started |
+| 2 | App shell, Home, `stats` API, hash routes | Done |
 | 3 | Home flows (New roadmap dialog, filters, list view) | Not started |
 | 4 | Roadmap views | Not started |
 | 5 | Hardening, remove legacy CSS | Not started |
