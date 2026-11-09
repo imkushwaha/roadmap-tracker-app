@@ -8792,7 +8792,7 @@
             "- Amazon\n- Microsoft\n- Google\n- Meta\n- Adobe\n- Uber\n- Salesforce\n- Atlassian\n- ServiceNow\n- NVIDIA\n- Walmart Global Tech",
             "### C \u2014 Consulting / Services",
             "Examples:",
-            "- Accenture\n- Deloitte\n- TCS\n- IBM\n- Capgemini\n- Infosys",
+            "- Accenture\n- Wipro\n- TCS\n- IBM\n- Capgemini\n- Infosys",
             "### D \u2014 AI Platform / Infrastructure",
             "Look for:",
             "- AI inference\n- ML platform\n- AI platform\n- model serving\n- AI developer tools\n- data infrastructure\n- evaluation infrastructure",
@@ -9938,7 +9938,7 @@
       "id": "ref-personal-operating-rules",
       "title": "Personal Operating Rules",
       "blocks": [
-        "1. **Do not learn a technology simply because it is trending.**\n2. **Prefer first-party documentation for fast-changing AI technologies.**\n3. **Build before consuming another tutorial.**\n4. **Benchmark whenever possible.**\n5. **Document trade-offs, not only implementation.**\n6. **Treat failure modes as part of engineering.**\n7. **Do not hide your consulting background; translate it into business impact and ownership.**\n8. **Do not expose Deloitte/client confidential information publicly.**\n9. **Avoid technology keyword dumping on LinkedIn.**\n10. **Do not wait until Month 10 to start networking.**\n11. **Use interview feedback as training data.**\n12. **Stop studying a topic once the relevant depth/exit criteria are met.**\n13. **Prioritize durable concepts over frameworks.**\n14. **A project without evaluation/observability is incomplete.**\n15. **A production AI system without security, reliability and cost thinking is incomplete.**"
+        "1. **Do not learn a technology simply because it is trending.**\n2. **Prefer first-party documentation for fast-changing AI technologies.**\n3. **Build before consuming another tutorial.**\n4. **Benchmark whenever possible.**\n5. **Document trade-offs, not only implementation.**\n6. **Treat failure modes as part of engineering.**\n7. **Do not hide your consulting background; translate it into business impact and ownership.**\n8. **Do not expose [Company]/client confidential information publicly.**\n9. **Avoid technology keyword dumping on LinkedIn.**\n10. **Do not wait until Month 10 to start networking.**\n11. **Use interview feedback as training data.**\n12. **Stop studying a topic once the relevant depth/exit criteria are met.**\n13. **Prioritize durable concepts over frameworks.**\n14. **A project without evaluation/observability is incomplete.**\n15. **A production AI system without security, reliability and cost thinking is incomplete.**"
       ]
     },
     {

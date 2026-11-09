@@ -111,15 +111,18 @@ Options left for a later phase if wanted: a creation wizard that pre-fills `prog
 | Piece | Where |
 |---|---|
 | API client | `js/api.js` — `AuthApi` and `RoadmapApi` (`list`, `create`, `restoreBuiltin`, `remove`, `getProgress`, `putProgress`) |
-| Dashboard markup | `index.html` — `#dashboardScreen`; the create dialog is rendered into the shared `#modalHost` |
+| Dashboard markup | `index.html` — `#dashboardScreen` inside the app shell (`#appShell`: sidebar + top bar); the create dialog is rendered into the shared `#modalHost`. Cards use the list endpoint's `stats` for the Month Strip and totals |
 | Flow | `js/app.js` — `boot` → `enterDashboard` → `showDashboard` / `renderDashboard` → (`openCreateRoadmapModal` → `submitCreateRoadmap`) → `openRoadmap` → `backToDashboard` |
 | Per-roadmap curriculum | `BUILTIN_DATA`, `BLANK_DATA`, and `let DATA` switched in `openRoadmap` by `source` |
 | Per-roadmap UI state | `resetViewState()` and `syncTabs()`; `renderBlankRoadmap()` for the empty onboarding card |
-| Styles | `css/styles.css` — "Roadmap dashboard" and "Custom roadmaps" sections |
+| Styles | `css/home.css` (cards, summary bar), `css/shell.css` (sidebar, top bar), `css/styles.css` ("Custom roadmaps") |
+| URLs | `parseRoute` / `navigate` / `replaceRoute` / `onPopState` in `js/app.js`: `#/` and `#/r/<id>/<view>`; Back and Forward are handled, and leaving a roadmap with unsaved edits asks first |
+| Home controls | `homeState` (view, sort, filter, search) in `js/app.js`; `renderHomeResults()` redraws only the results, so typing in search keeps focus. View and sort persist under `roadmap-dashboard:home`; the dismissed *Getting started* card under `roadmap-dashboard:getting-started` |
+| Dialogs | `openCreateRoadmapModal` (Blank / AI Engineer / AI soon), `confirmDeleteRoadmap` (typed name when `roadmapHasProgress`), shared `showModal` / `closeModal` (focus returns to the opener; Escape closes; Tab stays inside) |
 
 Session state: `session.roadmapId` is `null` on the dashboard and the open roadmap's id otherwise. Autosave only runs while a roadmap is open. `settleUnsavedChanges` is shared by "back to dashboard" and "log out": it flushes pending edits and asks before discarding anything that could not be saved.
 
-Z-order: roadmap app (50) < dashboard (350) < modal (400) < toasts (450) < auth screen (500).
+Z-order: top bar (20) < sidebar (30) < drawer scrim (55) and drawer (60) < modal (400) < toasts (450) < auth screen (500).
 
 ---
 

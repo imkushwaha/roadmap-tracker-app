@@ -6,7 +6,12 @@
 roadmap-dashboard/
 ├── index.html                     ← SPA shell (all script/style tags)
 ├── css/
-│   └── styles.css                 ← All UI styles (light + dark theme)
+│   ├── tokens.css                 ← Design tokens (light + dark) — see design-system.md
+│   ├── base.css                   ← Fonts, reset, focus ring, reduced motion
+│   ├── components.css             ← Buttons, fields, chips, modal, toasts, Month Strip
+│   ├── auth.css                   ← Log in / Create account screens
+│   └── styles.css                 ← Layout + per-view styles (shrinking)
+├── fonts/  img/                   ← Self-hosted IBM Plex Sans; logo and favicon
 ├── js/
 │   ├── progress-schema.js         ← UMD validator (browser + Node)
 │   ├── api.js                     ← AuthApi + RoadmapApi (fetch wrappers)
@@ -69,7 +74,7 @@ Cache-Control: no-store         — on every /api response
 express.json({ limit: '5mb' }) — parse JSON body (5 MB max)
 /api/auth/*     → authRouter     — auth routes (rate-limited; /me checks the session itself)
 /api/roadmaps/* → roadmapsRouter — protected (router.use(requireAuth) inside)
-Static allowlist                — index.html, css/, js/, data/roadmap.js
+Static allowlist                — index.html, css/, js/, fonts/, img/, data/roadmap.js
 404 handler                     — all other paths return { error: 'Not found' }
 ```
 
@@ -236,6 +241,7 @@ Shared by registration (`routes/auth.js`) and the restore endpoint (`routes/road
 
 | Method | Statement(s) | Returns |
 |--------|--------------|---------|
+| `listWithProgress(userId)` | Same join as `listForUser` plus `p.data` and `p.version`; used only by the list route to build `stats`; the raw data is stripped before responding | `RoadmapRow[]` with `progressData`, `progressVersion` |
 | `listForUser(userId)` | `SELECT r.id, r.name, r.description, r.source, r.created_at, p.updated_at AS last_activity_at FROM roadmaps r LEFT JOIN roadmap_progress p ON p.roadmap_id = r.id WHERE r.user_id = ? ORDER BY r.created_at, r.id` | `RoadmapRow[]`, each with `lastActivityAt: string \| null` |
 | `findOwned(userId, roadmapId)` | `SELECT … FROM roadmaps WHERE id = ? AND user_id = ?` | `RoadmapRow` or `undefined` |
 | `countForUser(userId)` | `SELECT COUNT(*) AS n FROM roadmaps WHERE user_id = ?` | number |

@@ -2130,7 +2130,7 @@ Examples:
 Examples:
 
 - Accenture
-- Deloitte
+- Wipro
 - TCS
 - IBM
 - Capgemini
@@ -3159,7 +3159,7 @@ Show:
 5. **Document trade-offs, not only implementation.**
 6. **Treat failure modes as part of engineering.**
 7. **Do not hide your consulting background; translate it into business impact and ownership.**
-8. **Do not expose Deloitte/client confidential information publicly.**
+8. **Do not expose [Company]/client confidential information publicly.**
 9. **Avoid technology keyword dumping on LinkedIn.**
 10. **Do not wait until Month 10 to start networking.**
 11. **Use interview feedback as training data.**

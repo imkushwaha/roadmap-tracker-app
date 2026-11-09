@@ -1,0 +1,206 @@
+/* ===========================================================
+   Components — buttons, fields, chips, badges, progress,
+   modal, toast, skeleton, avatar.
+   Class names that already existed are kept.
+   =========================================================== */
+
+/* ---------------- Buttons ---------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 36px; padding: 0 14px;
+  border: 1px solid var(--border-strong); background: var(--bg-elevated); color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: 14px; font-weight: 500; line-height: 1.2; text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.btn:hover { background: var(--bg-sunken); }
+.btn:active { background: var(--bg-sunken); border-color: var(--text-faint); }
+.btn[disabled], .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:active { background: var(--accent-pressed); border-color: var(--accent-pressed); }
+
+.btn-secondary { background: var(--bg-elevated); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+.btn-ghost:hover { background: var(--bg-sunken); color: var(--text); }
+
+.btn-danger { background: var(--danger); border-color: var(--danger); color: var(--danger-ink); }
+.btn-danger:hover { background: var(--danger); filter: brightness(0.92); }
+.btn-ghost-danger { background: transparent; color: var(--danger); border-color: var(--border-strong); }
+.btn-ghost-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+
+.btn-sm { min-height: 28px; padding: 0 10px; font-size: 13px; }
+.btn-lg { min-height: 44px; padding: 0 18px; }
+.btn-icon { width: 36px; padding: 0; }
+
+/* Loading: label hidden, spinner shown, width unchanged. */
+.btn.is-loading { position: relative; color: transparent !important; pointer-events: none; }
+.btn.is-loading::after {
+  content: ""; position: absolute; width: 16px; height: 16px;
+  border: 2px solid var(--accent-ink); border-right-color: transparent; border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.link-btn {
+  background: none; border: none; padding: 0; color: var(--accent);
+  font-size: inherit; font-weight: 500; text-decoration: underline; text-underline-offset: 2px;
+}
+.link-btn:hover { color: var(--accent-hover); }
+
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .btn-sm { min-height: 36px; }
+}
+
+/* ---------------- Form fields ---------------- */
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.field textarea, .field select {
+  width: 100%; min-height: 40px; padding: 9px 12px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: var(--bg-elevated); color: var(--text); font-size: 14px; font-family: inherit;
+  transition: border-color 0.12s ease;
+}
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):hover,
+.field textarea:hover, .field select:hover { border-color: var(--text-faint); }
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+.field textarea:focus, .field select:focus { border-color: var(--accent); }
+.field textarea { min-height: 80px; resize: vertical; }
+.field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: var(--danger); }
+.field-hint { font-size: 12px; color: var(--text-faint); margin: 6px 0 0; }
+.field-error { font-size: 12px; color: var(--danger); margin: 6px 0 0; }
+
+@media (max-width: 640px) {
+  .field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  .field textarea, .field select { font-size: 16px; } /* stops iOS zoom-on-focus */
+}
+
+/* ---------------- Progress bar ---------------- */
+.progress-track {
+  height: 8px; border-radius: 99px; background: var(--bg-sunken); overflow: hidden;
+}
+.progress-fill {
+  height: 100%; border-radius: 99px; background: var(--status-completed);
+  transition: width 0.3s ease;
+}
+.progress-row { display: flex; align-items: center; gap: 10px; }
+.progress-row .progress-track { flex: 1; }
+.progress-pct { font-size: 12.5px; font-weight: 600; color: var(--text-muted); min-width: 36px; text-align: right; }
+
+/* ---------------- Badges and status chips ---------------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 500;
+  white-space: nowrap;
+}
+.badge-depth-D3 { background: var(--accent-soft); color: var(--accent); }
+.badge-depth-D2 { background: var(--bg-sunken); color: var(--text-muted); }
+.badge-depth-D1 { background: var(--bg-sunken); color: var(--text-faint); }
+.badge-here { background: var(--accent-soft); color: var(--accent); }
+.badge-custom { background: var(--accent-soft); color: var(--accent); }
+.badge-success { background: var(--status-completed-bg); color: var(--status-completed); }
+.badge-warning { background: var(--status-in-progress-bg); color: var(--status-in-progress); }
+.badge-danger { background: var(--status-blocked-bg); color: var(--status-blocked); }
+
+.status-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 500;
+}
+.status-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.status-not_started { color: var(--status-not-started); background: var(--status-not-started-bg); }
+.status-in_progress { color: var(--status-in-progress); background: var(--status-in-progress-bg); }
+.status-completed { color: var(--status-completed); background: var(--status-completed-bg); }
+.status-blocked { color: var(--status-blocked); background: var(--status-blocked-bg); }
+
+select.status-select {
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--bg-elevated);
+  color: var(--text); font-size: 13px; font-weight: 500; padding: 5px 8px;
+}
+
+/* ---------------- Modal ---------------- */
+.modal-host { position: fixed; inset: 0; z-index: 400; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-backdrop { position: absolute; inset: 0; background: rgb(8 17 31 / 0.55); }
+.modal {
+  position: relative; background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  width: 100%; max-width: 480px; max-height: 85vh; overflow-y: auto; padding: 24px;
+}
+.modal h2 { margin: 0 0 16px; font-size: 18px; line-height: 1.4; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* ---------------- Toasts ---------------- */
+.toast-host { position: fixed; bottom: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 450; }
+.toast {
+  background: var(--bg-elevated); border: 1px solid var(--border); box-shadow: var(--shadow-md);
+  border-radius: var(--radius-md); padding: 12px 16px; font-size: 14px; max-width: 360px;
+  animation: toast-in 0.16s ease;
+}
+.toast.success { border-left: 3px solid var(--status-completed); }
+.toast.error { border-left: 3px solid var(--status-blocked); }
+.toast.celebrate { border-left: 3px solid var(--accent); }
+@keyframes toast-in { from { transform: translateY(4px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@media (max-width: 640px) {
+  .toast-host { left: 12px; right: 12px; bottom: 12px; align-items: stretch; }
+  .toast { max-width: none; }
+}
+
+/* ---------------- Skeleton (loading placeholder) ---------------- */
+.skeleton {
+  display: block; border-radius: var(--radius-sm); min-height: 12px;
+  background: linear-gradient(90deg, var(--bg-sunken) 25%, var(--border) 50%, var(--bg-sunken) 75%);
+  background-size: 200% 100%; animation: skeleton 1.4s ease-in-out infinite;
+}
+@keyframes skeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ---------------- Avatar (initials) ---------------- */
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em; user-select: none;
+}
+.avatar-lg { width: 40px; height: 40px; font-size: 14px; }
+
+/* ---------------- Mini button (steppers, inline actions) ---------------- */
+.mini-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; min-height: 28px; padding: 0 8px;
+  border: 1px solid var(--border-strong); background: var(--bg-elevated); color: var(--text);
+  border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; line-height: 1;
+  transition: background 0.12s ease;
+}
+.mini-btn:hover { background: var(--bg-sunken); }
+@media (pointer: coarse) { .mini-btn { min-width: 36px; min-height: 36px; } }
+
+/* ---------------- Month Strip (signature element) ----------------
+   One segment per month; each segment is a stacked bar of its tasks.
+   Markup comes from js/month-strip.js. */
+.strip { display: flex; gap: 4px; align-items: flex-start; width: 100%; }
+.strip-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.strip-seg {
+  display: flex; height: 8px; border-radius: 3px; overflow: hidden;
+  background: var(--bg-sunken); box-shadow: inset 0 0 0 1px var(--border);
+}
+.strip-sm .strip-seg { height: 4px; border-radius: 2px; }
+.strip-lg .strip-seg { height: 14px; border-radius: 4px; }
+.strip-part { display: block; flex-grow: 0; flex-shrink: 0; height: 100%; }
+.strip-part.is-done { background: var(--status-completed); }
+.strip-part.is-progress { background: var(--status-in-progress); }
+.strip-part.is-blocked { background: var(--status-blocked); }
+.strip-label { font-size: 12px; line-height: 1; color: var(--text-faint); text-align: center; }
+.strip-col.is-current .strip-label { color: var(--accent); font-weight: 600; }
+.strip-col.is-current::after {
+  content: ""; height: 3px; border-radius: 2px; background: var(--accent); margin-top: -2px;
+}
+.strip.is-empty {
+  height: 8px; border-radius: 3px; border: 1px dashed var(--border-strong); background: transparent;
+}
+.strip-sm.is-empty { height: 4px; }
+.strip-lg.is-empty { height: 14px; }
+
+/* The one deliberate motion: segments fill left to right once on first load. */
+.strip.is-animated .strip-part { transform-origin: left center; animation: strip-grow 0.6s ease-out both; }
+@keyframes strip-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }

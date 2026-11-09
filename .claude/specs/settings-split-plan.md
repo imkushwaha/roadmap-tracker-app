@@ -1,7 +1,7 @@
 # Settings Split — Account Menu vs Roadmap Settings
 
 **Date:** 2026-11-04
-**Status:** Planning — not started
+**Status:** Superseded by ui-redesign-spec.md (Phase 2)
 **Scope:** Front end only (`index.html`, `js/app.js`, `css/styles.css`) plus docs. No API, database or server change.
 
 ---

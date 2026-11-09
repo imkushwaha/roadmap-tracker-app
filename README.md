@@ -36,11 +36,18 @@ A single-page web application for tracking progress through structured roadmaps.
 
 **Roadmap dashboard** — after login you land on "Your roadmaps":
 - Every account is seeded with the **AI Engineer Roadmap**; **Open** it to use the views below, with a back arrow to return to the dashboard
-- **Delete** a roadmap (and its progress) — always behind a confirmation dialog
+- **Delete** a roadmap (and its progress) from the card's **⋯** menu — always behind a confirmation dialog; a roadmap that has progress also asks you to **type its name**
+- Each card shows a **Month Strip** (one segment per month, filled by completed / in-progress / blocked tasks, current month marked), percent complete, task counts and the current month; a summary bar totals tasks done across roadmaps
+- **App shell** — a left sidebar (roadmap switcher on Home; view navigation inside a roadmap; collapsible, and a slide-in drawer on small screens) and a top bar with breadcrumb, search, save status, roadmap settings and the account menu
+- **Links that work** — `#/` is Home and `#/r/<id>/<view>` is a roadmap view, so refresh, Back/Forward and bookmarks work; leaving a roadmap with unsaved edits still asks first
 - **Restore** the AI Engineer Roadmap (fresh progress) if you deleted it
 - **Create new roadmap** — give it a name, an optional description and the month Month 1 starts in; it opens as an empty roadmap that you build with the in-roadmap editors (Month → Section, a week or a theme → Topic → Tasks). An empty roadmap shows an onboarding card with an **Add your first month** button
 - Up to **20 roadmaps** per account
-- **Create roadmap with AI** is shown as *Coming soon*
+- **New roadmap** dialog — choose *Blank roadmap* (name, description with a character counter, start month), restore the *AI Engineer roadmap* when you no longer have it, or see the disabled *Describe a goal (AI)* option marked **Soon**
+- **Find your roadmaps** — with two or more roadmaps, Home adds search (name and description), status filters with counts (All, In progress, Not started, Completed) and sorting (Recent activity, Name, Progress); switch between a **grid** and a **list** view (columns sort; your view and sort are remembered)
+- **Right-hand panel** — *Current focus* (the current month, and this week's section for the built-in roadmap, of your most recently used roadmap) and a dismissible *Getting started* checklist
+- **Log in / Create account** — split-screen layout (brand panel plus form), show/hide password, Caps Lock hint, live username-availability and password-requirement checks, errors announced to screen readers
+- **Appearance** — Light, Dark or **System** (follows your operating system live); the choice is remembered per browser and applied before the page paints, so there is no flash
 
 Views inside a roadmap:
 
@@ -121,7 +128,7 @@ Open http://localhost:3000, choose **Create an account**, and start tracking. Ex
 npm test
 ```
 
-All 58 tests cover auth flows, roadmap list/create/delete/restore, custom-roadmap input validation and the 20-roadmap cap, per-roadmap progress save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
+All 79 tests cover auth flows, roadmap list/create/delete/restore, custom-roadmap input validation and the 20-roadmap cap, per-roadmap progress save/load, conflict detection, cross-user isolation, rate limiting, schema validation, and static-file security.
 
 ### Regenerate Roadmap Data
 
@@ -141,11 +148,23 @@ roadmap-dashboard/
 │
 ├── index.html                    App shell + login screen
 ├── css/
-│   └── styles.css                All styling (light + dark themes)
+│   ├── tokens.css                Design tokens: colour, radius, spacing (light + dark)
+│   ├── base.css                  Fonts, reset, typography, focus ring, reduced motion
+│   ├── components.css            Buttons, fields, chips, modal, toasts, Month Strip, …
+│   ├── auth.css                  Log in / Create account screens
+│   ├── shell.css                 App shell: sidebar, top bar, drawer
+│   ├── home.css                  Home (roadmap list): summary bar, cards
+│   └── styles.css                Layout + per-view rules (shrinking during the redesign)
+├── fonts/                        IBM Plex Sans (self-hosted, SIL OFL)
+├── img/                          logo.svg, favicon.svg
 │
 ├── js/
+│   ├── theme-boot.js             Light / Dark / System, applied before first paint (window.Theme)
+│   ├── icons.js                  Inline SVG icon set (window.Icons)
+│   ├── month-strip.js            Month Strip component (window.MonthStrip)
 │   ├── app.js                    UI state, rendering, dashboard, autosave, auth
 │   ├── api.js                    HTTP client (AuthApi, RoadmapApi)
+│   ├── roadmap-stats.js          Progress summaries for the roadmap list (UMD, used by the server)
 │   └── progress-schema.js        Progress data validator (UMD — browser + server)
 │
 ├── server/
@@ -173,6 +192,7 @@ roadmap-dashboard/
 │   ├── api.test.js               Integration tests: auth, progress, conflicts, isolation
 │   ├── roadmaps.test.js          Roadmap list/create/delete/restore, validation, cap, ownership
 │   ├── config.test.js            Unit tests for config loader
+│   ├── stats.test.js             Progress summaries: counting rules, cache, list endpoint
 │   └── schema.test.js            Unit tests for progress-schema validator
 │
 ├── data/
@@ -557,7 +577,7 @@ All require a session (`401` otherwise). A roadmap id that doesn't exist, is mal
 
 | Method | Path | Request body | Response |
 |---|---|---|---|
-| `GET` | `/api/roadmaps` | — | `200 {roadmaps: [{id, name, description, source, createdAt, lastActivityAt}]}` — `lastActivityAt` is `null` until the first save |
+| `GET` | `/api/roadmaps` | — | `200 {roadmaps: [{id, name, description, source, createdAt, lastActivityAt, stats}]}` — `lastActivityAt` is `null` until the first save; `stats` is a progress summary (`total`, `completed`, `inProgress`, `blocked`, `completedLast7Days`, `startMonth`, per-month `months[]`), never the raw progress. See `documentation/api-design.md` |
 | `POST` | `/api/roadmaps` | **Create:** `{name, description?, startMonth?}` | `201 {roadmap}` with `source: "custom"` · `400` invalid input or unknown `source` · `409` at the 20-roadmap cap |
 | `POST` | `/api/roadmaps` | **Restore:** `{source: "builtin_ai_engineer"}` | `201 {roadmap}` (starter roadmap, fresh progress) · `409` you already have it |
 | `DELETE` | `/api/roadmaps/:id` | — | `204` (progress cascades) · `404` |
@@ -570,7 +590,7 @@ The progress `PUT` uses **compare-and-swap** in a single atomic statement (`UPDA
 
 ### Static files served
 
-`/`, `/index.html`, `/css/*`, `/js/*`, `/data/roadmap.js`
+`/`, `/index.html`, `/css/*`, `/js/*`, `/fonts/*`, `/img/*`, `/data/roadmap.js`
 
 Everything else (database, `.env`, server source, `package.json`, `node_modules`) returns `404`.
 
@@ -589,7 +609,8 @@ Everything else (database, `.env`, server source, `package.json`, `node_modules`
 | Input validation | Username regex + password length checked before any DB call. Progress data validated against the schema before every write. |
 | Database credentials | `TURSO_AUTH_TOKEN` lives only in environment variables (`.env` is git-ignored; `sync: false` in `render.yaml` keeps it out of the repo). |
 | SQL injection | All queries are parameterised via `db.execute({ sql, args })` (`@libsql/client`); values are never interpolated into SQL. User data queries are always scoped by session user id, never by request body. |
-| Static allowlist | Only four path patterns serve files; `path.join` + `sendFile` prevent path-traversal. |
+| Static allowlist | Only an explicit list of paths serves files (`/`, `/css`, `/js`, `/fonts`, `/img`, `/data/roadmap.js`); `path.join` + `sendFile` prevent path-traversal. |
+| Content Security Policy | `helmet` default CSP: scripts only from `'self'` (no inline scripts), so the theme script is the external `js/theme-boot.js`. Fonts are self-hosted; no third-party requests. |
 
 **Not included by design:** password reset, email verification, 2FA, account deletion UI, admin interface, JWT revocation.
 
@@ -642,6 +663,7 @@ The test suite uses Node's built-in `node:test` runner — no Jest, no Mocha. Ea
 | `test/api.test.js` | Auth flows, progress round-trips, version conflicts, cross-user isolation, rate limiting, static-file security |
 | `test/roadmaps.test.js` | Starter roadmap seeding, list/create/delete/restore, custom-roadmap validation, 20-roadmap cap, markup in names, ownership (404s), atomic registration |
 | `test/config.test.js` | Config loader — env vars, production guards, defaults |
+| `test/stats.test.js` | `roadmap-stats` counting rules (tasks, deliverables, user-added topics and months, status counts, last 7 days), the stats cache (version key, TTL, size cap), and `GET /api/roadmaps` `stats` (849 items on a new account, follows saves, never exposes raw progress, isolated per user) |
 | `test/schema.test.js` | Progress schema validator — valid/invalid shapes, `__proto__` injection, custom months |
 
 ---

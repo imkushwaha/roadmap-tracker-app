@@ -20,7 +20,6 @@
   // The curriculum of the roadmap that is currently open.
   let DATA = BUILTIN_DATA;
   const STORAGE_KEY = "roadmap-dashboard:progress:v1";
-  const THEME_KEY = "roadmap-dashboard:theme";
 
   const STATUS = ["not_started", "in_progress", "completed", "blocked"];
   const STATUS_LABEL = {
@@ -437,7 +436,9 @@
   }
 
   function statusSelect(id, status) {
-    return `<select class="status-select" data-action="set-status" data-id="${id}">
+    const entry = indexEntry(id);
+    const label = entry ? `Status: ${entry.title}` : "Status";
+    return `<select class="status-select" data-action="set-status" data-id="${id}" aria-label="${esc(label)}">
       ${STATUS.map((s) => `<option value="${s}" ${s === status ? "selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}
     </select>`;
   }
@@ -554,7 +555,7 @@
             const isDone = st.pct === 100;
             return `<div style="margin-bottom:12px;">
               <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px;">
-                <span style="font-weight:700;">M${p.number} — ${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">YOU ARE HERE</span>' : ""} ${isDone ? '<span class="badge" style="background:var(--status-completed-bg); color:var(--status-completed);">✓ done</span>' : ""}</span>
+                <span style="font-weight:700;">M${p.number} — ${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">Current</span>' : ""} ${isDone ? '<span class="badge" style="background:var(--status-completed-bg); color:var(--status-completed);">✓ done</span>' : ""}</span>
                 <span style="color:var(--text-faint);">${fmtDateShort(phaseStartDate(p.number))}–${fmtDateShort(phaseEndDate(p.number))}</span>
               </div>
               ${progressBar(st.pct)}
@@ -627,7 +628,7 @@
               <div class="phase-card-head">
                 <div>
                   <div class="phase-num">Month ${p.number} · ${esc(phaseCalendarLabel(p.number))}</div>
-                  <div class="phase-title">${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">YOU ARE HERE</span>' : ""}${p.custom ? ' <span class="badge badge-custom">Custom</span>' : ""}</div>
+                  <div class="phase-title">${esc(p.title)} ${isCurrent ? '<span class="badge badge-here">Current</span>' : ""}${p.custom ? ' <span class="badge badge-custom">Custom</span>' : ""}</div>
                   <div class="phase-dates">${fmtDate(phaseStartDate(p.number))} – ${fmtDate(phaseEndDate(p.number))}${p.custom ? ` <button class="mini-btn" data-action="delete-month" data-id="${p.id}" title="Delete this month and everything in it">🗑 Delete month</button>` : ""}</div>
                 </div>
                 <button class="phase-expand-btn" data-action="toggle-phase" data-id="${p.id}">${expandedPhases[p.id] ? "Collapse" : "Expand"}</button>
@@ -743,7 +744,7 @@
       <div class="section-title">Checklist</div>
       <div class="filter-bar">
         ${["all", ...STATUS].map((s) => `<button class="chip-filter ${checklistFilters.status === s ? "active" : ""}" data-action="filter-status" data-value="${s}">${s === "all" ? "All" : STATUS_LABEL[s]}</button>`).join("")}
-        <select class="select-filter" data-action="filter-phase">
+        <select class="select-filter" data-action="filter-phase" aria-label="Filter by month">
           <option value="all">All months</option>
           ${allPhases().map((p) => `<option value="${p.id}" ${checklistFilters.phase === p.id ? "selected" : ""}>Month ${p.number} — ${esc(p.title)}</option>`).join("")}
         </select>
@@ -847,7 +848,7 @@
     container.innerHTML = `
       <div class="section-title">Kanban</div>
       <div class="kanban-toolbar">
-        <select class="select-filter" data-action="kanban-phase">
+        <select class="select-filter" data-action="kanban-phase" aria-label="Month">
           ${allPhases().map((p) => `<option value="${p.id}" ${kanbanState.phase === p.id ? "selected" : ""}>Month ${p.number} — ${esc(p.title)}</option>`).join("")}
         </select>
         <span style="font-size:12px; color:var(--text-faint);">Drag cards between columns, or use the ⋯ menu on a card.</span>
@@ -888,7 +889,7 @@
             <h3>${esc(cat.title)} <span style="color:var(--text-faint); font-weight:600; font-size:11.5px;">(${done}/${cat.skills.length})</span></h3>
             ${skills.map((sk) => `
               <div class="mastery-skill-row">
-                <input type="checkbox" class="subtask-checkbox" data-action="toggle-complete" data-id="${sk.id}" ${getItem(sk.id).status === "completed" ? "checked" : ""} />
+                <input type="checkbox" class="subtask-checkbox" data-action="toggle-complete" data-id="${sk.id}" aria-label="${esc(sk.title)}" ${getItem(sk.id).status === "completed" ? "checked" : ""} />
                 <span class="skill-title ${getItem(sk.id).status === "completed" ? "done" : ""}" style="${getItem(sk.id).status === "completed" ? "text-decoration:line-through; color:var(--text-faint);" : ""}">${esc(sk.title)}</span>
                 ${depthBadge(sk.depth)}
               </div>
@@ -947,6 +948,8 @@
 
   function celebrate(phaseTitle) {
     toast(`🎉 Month complete: ${phaseTitle}!`, "celebrate");
+    // Honour the OS "reduce motion" setting: the toast alone is the celebration.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const canvas = document.getElementById("confettiCanvas");
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -1025,8 +1028,37 @@
     `;
     host.classList.remove("hidden");
   }
+  // Dialogs opened with showModal() return focus to what opened them when they close.
+  let modalReturnFocus = null;
+  function showModal(returnFocus) {
+    const host = document.getElementById("modalHost");
+    const modal = host.querySelector(".modal");
+    modalReturnFocus = returnFocus || document.activeElement;
+    const title = modal.querySelector("h2");
+    if (title) { title.id = "modalTitle"; modal.setAttribute("aria-labelledby", "modalTitle"); }
+    else modal.removeAttribute("aria-labelledby");
+    host.classList.remove("hidden");
+  }
   function closeModal() {
-    document.getElementById("modalHost").classList.add("hidden");
+    const host = document.getElementById("modalHost");
+    if (host.classList.contains("hidden")) return;
+    host.classList.add("hidden");
+    const back = modalReturnFocus;
+    modalReturnFocus = null;
+    if (back && back !== document.body && document.contains(back) && typeof back.focus === "function") back.focus();
+  }
+  // Keep Tab / Shift+Tab inside the open dialog.
+  function trapModalFocus(e) {
+    const focusable = [...document.querySelectorAll("#modalHost .modal a[href], #modalHost .modal button, #modalHost .modal input, #modalHost .modal select, #modalHost .modal textarea, #modalHost .modal [tabindex]")]
+      .filter((el) => !el.disabled && el.tabIndex >= 0 && el.offsetParent !== null);
+    if (!focusable.length) { e.preventDefault(); return; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !document.querySelector("#modalHost .modal").contains(document.activeElement))) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
   }
   function saveModal(id) {
     const status = document.getElementById("modalStatus").value;
@@ -1057,32 +1089,38 @@
   function rerender() {
     const main = document.getElementById("main");
     VIEW_RENDERERS[state.view](main);
+    renderSidebarStrip();
   }
-
-  function setView(view) {
+  function setView(view, opts) {
     state.view = view;
-    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+    document.querySelectorAll(".tab").forEach((t) => {
+      const active = t.dataset.view === view;
+      t.classList.toggle("active", active);
+      if (active) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+    });
+    if (!(opts && opts.silent) && session.roadmapId != null) replaceRoute(routeFor(session.roadmapId, view));
     rerender();
   }
 
   // ---------------------------------------------------------
   // Theme
   // ---------------------------------------------------------
-  function applyTheme(theme) {
-    if (theme === "dark" || theme === "light") {
-      document.documentElement.setAttribute("data-theme", theme);
-    } else {
-      document.documentElement.removeAttribute("data-theme");
-    }
-    const isDark = theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    const lightBtn = document.getElementById("themeLightBtn");
-    const darkBtn = document.getElementById("themeDarkBtn");
-    if (lightBtn) lightBtn.classList.toggle("active", !isDark);
-    if (darkBtn) darkBtn.classList.toggle("active", isDark);
+  // The saved choice (light / dark / system) lives in js/theme-boot.js, which
+  // also applies it before first paint. Here we only keep the menu buttons in sync.
+  const THEME_BUTTONS = { light: "themeLightBtn", dark: "themeDarkBtn", system: "themeSystemBtn" };
+
+  function syncThemeButtons() {
+    const mode = window.Theme.get();
+    Object.entries(THEME_BUTTONS).forEach(([value, id]) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.classList.toggle("active", value === mode);
+      btn.setAttribute("aria-pressed", String(value === mode));
+    });
   }
   function initTheme() {
-    const saved = localStorage.getItem(THEME_KEY);
-    applyTheme(saved);
+    window.Theme.onChange(syncThemeButtons);
+    syncThemeButtons();
   }
 
   // ---------------------------------------------------------
@@ -1483,17 +1521,31 @@
   function closeAllMenus() { menus.forEach((m) => m.close()); }
 
   // The single account menu lives in whichever header is on screen.
-  function mountAccountMenu(slotId) {
-    const slot = $(slotId);
-    const anchor = $("profileAnchor");
-    if (anchor.parentElement !== slot) slot.appendChild(anchor);
-  }
-
   function wireEvents() {
     document.getElementById("tabs").addEventListener("click", (e) => {
       const btn = e.target.closest(".tab");
-      if (btn) setView(btn.dataset.view);
+      if (!btn) return;
+      setView(btn.dataset.view);
+      closeNav();
+      window.scrollTo(0, 0);
     });
+
+    // Sidebar: roadmap switcher, drawer and collapse
+    $("sidebar").addEventListener("click", onDashboardClick);
+    $("sidebarOpenBtn").addEventListener("click", openNav);
+    $("sidebarScrim").addEventListener("click", closeNav);
+    $("sidebarCollapseBtn").addEventListener("click", () => {
+      setSidebarCollapsed(!$("appShell").classList.contains("is-collapsed"), true);
+    });
+    // Actions available from several places (menus, sidebar, breadcrumb)
+    document.addEventListener("click", (e) => {
+      const el = e.target.closest("[data-action]");
+      if (!el) { closeCardMenus(); return; }
+      if (el.dataset.action === "about") { closeAllMenus(); closeNav(); openAboutModal(); }
+      if (el.dataset.action === "go-home") backToDashboard();
+      if (!el.closest(".rc-menu")) closeCardMenus();
+    });
+    window.addEventListener("popstate", onPopState);
 
     // Menus: account (profile) and roadmap settings
     menuRefs.account = createMenu($("profileTrigger"), $("profilePanel"));
@@ -1508,16 +1560,13 @@
       if (e.key !== "Escape") return;
       const open = menus.find((m) => m.isOpen());
       if (open) open.close(true);
+      closeCardMenus();
+      if ($("appShell").classList.contains("nav-open")) { closeNav(); $("sidebarOpenBtn").focus(); }
     });
 
     // Theme
-    $("themeLightBtn").addEventListener("click", () => {
-      localStorage.setItem(THEME_KEY, "light");
-      applyTheme("light");
-    });
-    $("themeDarkBtn").addEventListener("click", () => {
-      localStorage.setItem(THEME_KEY, "dark");
-      applyTheme("dark");
+    Object.entries(THEME_BUTTONS).forEach(([value, id]) => {
+      $(id).addEventListener("click", () => window.Theme.set(value));
     });
 
     // Search (tab bar, roadmap only)
@@ -1840,24 +1889,57 @@
     authMode = mode;
     const reg = mode === "register";
     $("authTitle").textContent = reg ? "Create your account" : "Log in";
+    $("authSubtitle").textContent = reg
+      ? "Start with the 10-month AI Engineer roadmap, or build your own."
+      : "Welcome back. Pick up where you left off.";
     $("authSubmit").textContent = reg ? "Create account" : "Log in";
     $("authToggleText").textContent = reg ? "Already have an account?" : "New here?";
     $("authToggle").textContent = reg ? "Log in" : "Create an account";
-    $("authHint").classList.toggle("hidden", !reg);
+    $("authUsernameRule").classList.toggle("hidden", !reg);
+    $("authPwRules").classList.toggle("hidden", !reg);
     $("authPassword").autocomplete = reg ? "new-password" : "current-password";
     $("authError").textContent = "";
     $("authRegisterFields").classList.toggle("hidden", !reg);
     $("authConfirmPasswordField").classList.toggle("hidden", !reg);
-    $("authUsernameLabel").textContent = reg ? "User ID" : "Username";
     $("authUsernameStatus").textContent = "";
     $("authUsernameStatus").className = "auth-field-hint";
     $("authPasswordMatch").textContent = "";
     $("authPasswordMatch").className = "auth-field-hint";
+    setPasswordVisible(false);
+    clearInvalid();
+    updatePasswordRules();
     if (!reg) {
       $("authFirstName").value = "";
       $("authLastName").value = "";
       $("authConfirmPassword").value = "";
     }
+  }
+
+  // ----- Auth form helpers -----
+  const AUTH_FIELDS = ["authFirstName", "authLastName", "authUsername", "authPassword", "authConfirmPassword"];
+
+  function clearInvalid() {
+    AUTH_FIELDS.forEach((id) => $(id).removeAttribute("aria-invalid"));
+  }
+
+  // Show a message in the error banner, mark the field and move focus to it.
+  function failAuth(message, fieldId) {
+    $("authError").textContent = message;
+    if (!fieldId) return;
+    $(fieldId).setAttribute("aria-invalid", "true");
+    $(fieldId).focus();
+  }
+
+  function setPasswordVisible(visible) {
+    ["authPassword", "authConfirmPassword"].forEach((id) => { $(id).type = visible ? "text" : "password"; });
+    const btn = $("authPasswordToggle");
+    btn.setAttribute("aria-pressed", String(visible));
+    btn.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+    btn.innerHTML = window.Icons.svg(visible ? "eye-off" : "eye", { size: 18 });
+  }
+
+  function updatePasswordRules() {
+    $("authRuleLength").classList.toggle("met", $("authPassword").value.length >= 8);
   }
 
   function showAuth(mode, notice, opts) {
@@ -1902,38 +1984,41 @@
     ev.preventDefault();
     const username = $("authUsername").value.trim();
     const password = $("authPassword").value;
-    const err = $("authError");
-    err.textContent = "";
-    if (!username || !password) { err.textContent = "Enter a username and password."; return; }
-    if (authMode === "register") {
-      const firstName = $("authFirstName").value.trim();
-      const lastName  = $("authLastName").value.trim();
-      const confirmPassword = $("authConfirmPassword").value;
-      if (!firstName) { err.textContent = "Please enter your first name."; return; }
-      if (!lastName)  { err.textContent = "Please enter your last name."; return; }
-      if (!/^[A-Za-z0-9_-]{3,32}$/.test(username)) { err.textContent = "User ID must be 3–32 characters: letters, numbers, _ or -."; return; }
-      if (password.length < 8) { err.textContent = "Password must be at least 8 characters."; return; }
-      if (password !== confirmPassword) { err.textContent = "Passwords do not match."; return; }
+    $("authError").textContent = "";
+    clearInvalid();
+    const register = authMode === "register";
+    const firstName = $("authFirstName").value.trim();
+    const lastName = $("authLastName").value.trim();
+
+    if (register && !firstName) { failAuth("Enter your first name.", "authFirstName"); return; }
+    if (register && !lastName) { failAuth("Enter your last name.", "authLastName"); return; }
+    if (!username) { failAuth(register ? "Choose a username." : "Enter your username.", "authUsername"); return; }
+    if (register && !/^[A-Za-z0-9_-]{3,32}$/.test(username)) {
+      failAuth("Username must be 3 to 32 characters: letters, numbers, _ or -.", "authUsername"); return;
     }
+    if (!password) { failAuth(register ? "Choose a password." : "Enter your password.", "authPassword"); return; }
+    if (register && password.length < 8) { failAuth("Password must be at least 8 characters.", "authPassword"); return; }
+    if (register && password !== $("authConfirmPassword").value) {
+      failAuth("Passwords don't match.", "authConfirmPassword"); return;
+    }
+
     const btn = $("authSubmit");
     btn.disabled = true;
+    btn.classList.add("is-loading");
     try {
-      let res;
-      if (authMode === "register") {
-        const firstName = $("authFirstName").value.trim();
-        const lastName  = $("authLastName").value.trim();
-        res = await window.AuthApi.register(firstName, lastName, username, password);
-      } else {
-        res = await window.AuthApi.login(username, password);
-      }
+      const res = register
+        ? await window.AuthApi.register(firstName, lastName, username, password)
+        : await window.AuthApi.login(username, password);
       $("authPassword").value = "";
       $("authConfirmPassword").value = "";
       session.expiredFor = null;
       enterDashboard(res.user);
+      if (register) toast("Account created. Your AI Engineer roadmap is ready.", "success");
     } catch (e) {
-      err.textContent = e.message;
+      $("authError").textContent = e.message;
     } finally {
       btn.disabled = false;
+      btn.classList.remove("is-loading");
     }
   }
 
@@ -1957,7 +2042,8 @@
       conflict: false, conflictServer: null, retries: 0, expiredFor: null });
   }
 
-  // Called once the user is authenticated: lands them on the roadmap dashboard.
+  // Called once the user is authenticated: lands them on the roadmap named in
+  // the URL (#/r/12/overview) or, otherwise, on the roadmap list.
   function enterDashboard(user) {
     const firstName = user.firstName || "";
     const lastName = user.lastName || "";
@@ -1968,7 +2054,138 @@
     $("profileName").textContent = fullName;
     $("panelFullName").textContent = fullName;
     $("panelUsername").textContent = "@" + user.username;
+    $("profileAvatar").textContent = initialsOf(firstName, lastName, user.username);
     hideAuth();
+    const route = parseRoute();
+    if (route) {
+      openRoadmap(route.id, { view: route.view, push: false });
+    } else {
+      replaceRoute("#/"); // so Back from a roadmap lands on a real Home entry
+      showDashboard();
+    }
+  }
+
+  function initialsOf(firstName, lastName, username) {
+    const two = `${(firstName || "").charAt(0)}${(lastName || "").charAt(0)}`;
+    return (two.length === 2 ? two : String(username || "?").slice(0, 2)).toUpperCase();
+  }
+
+  // ---------------------------------------------------------
+  // App shell: sidebar, context (home / roadmap), About
+  // ---------------------------------------------------------
+  const SIDEBAR_KEY = "roadmap-dashboard:sidebar";
+
+  // Elements marked data-icon="name" get their SVG here (names are fixed identifiers).
+  function hydrateIcons() {
+    document.querySelectorAll("[data-icon]").forEach((el) => {
+      el.innerHTML = window.Icons.svg(el.dataset.icon, { size: el.classList.contains("nav-icon") ? 20 : 14 });
+    });
+    $("sidebarOpenBtn").innerHTML = window.Icons.svg("menu", { size: 20 });
+  }
+
+  function setContext(ctx) {
+    const home = ctx === "home";
+    $("appShell").dataset.context = ctx;
+    $("sidebarHome").classList.toggle("hidden", !home);
+    $("sidebarRoadmap").classList.toggle("hidden", home);
+    $("crumbRoadmap").classList.toggle("hidden", home);
+    $("crumbHome").innerHTML = home
+      ? `<span class="crumb-current">Roadmaps</span>`
+      : `<button type="button" class="crumb-link" data-action="go-home">Roadmaps</button>`;
+    closeNav();
+  }
+
+  function openNav() {
+    $("appShell").classList.add("nav-open");
+    $("sidebarScrim").hidden = false;
+    $("sidebarOpenBtn").setAttribute("aria-expanded", "true");
+  }
+  function closeNav() {
+    $("appShell").classList.remove("nav-open");
+    $("sidebarScrim").hidden = true;
+    $("sidebarOpenBtn").setAttribute("aria-expanded", "false");
+  }
+  function setSidebarCollapsed(collapsed, remember) {
+    $("appShell").classList.toggle("is-collapsed", collapsed);
+    const btn = $("sidebarCollapseBtn");
+    btn.setAttribute("aria-pressed", String(collapsed));
+    btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    if (remember) {
+      try { localStorage.setItem(SIDEBAR_KEY, collapsed ? "collapsed" : "expanded"); } catch { /* storage blocked */ }
+    }
+  }
+  function initSidebar() {
+    let saved = null;
+    try { saved = localStorage.getItem(SIDEBAR_KEY); } catch { /* storage blocked */ }
+    setSidebarCollapsed(saved === "collapsed", false);
+  }
+
+  function openAboutModal() {
+    const host = $("modalHost");
+    host.querySelector(".modal").innerHTML = `
+      <h2>About Roadmap Tracker</h2>
+      <p class="about-text">Track your progress through structured roadmaps, starting with a 10-month Production AI Engineer plan, or build your own.</p>
+      <ul class="about-list">
+        <li>&copy; ${new Date().getFullYear()} Roadmap Tracker. All rights reserved.</li>
+        <li>Developed by <a href="mailto:upendra.kumar48762@gmail.com">upendra.kumar48762@gmail.com</a></li>
+        <li><a href="https://github.com/imkushwaha" target="_blank" rel="noopener">GitHub: imkushwaha</a></li>
+        <li>If this tool helps you, please <a href="https://github.com/imkushwaha" target="_blank" rel="noopener">star the repo</a>.</li>
+        <li>Built with planning &amp; development assistance from <strong>Claude</strong> (Anthropic AI).</li>
+        <li>Open source. Contributions welcome.</li>
+      </ul>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary" data-action="close-modal" id="aboutCloseBtn">Close</button>
+      </div>`;
+    showModal();
+    $("aboutCloseBtn").focus();
+  }
+
+  // ---------------------------------------------------------
+  // Routing: plain #hash URLs, no router library.
+  //   #/                      roadmap list
+  //   #/r/12/overview         roadmap 12, Overview view
+  // pushState adds a history entry (Back works); replaceState does not.
+  // ---------------------------------------------------------
+  let lastHash = window.location.hash;
+
+  function parseRoute() {
+    const m = /^#\/r\/(\d+)(?:\/([a-z]+))?$/.exec(window.location.hash);
+    return m ? { id: Number(m[1]), view: m[2] || "overview" } : null;
+  }
+  function routeFor(id, view) { return `#/r/${id}/${view}`; }
+  function navigate(hash) {
+    if (window.location.hash === hash) return;
+    window.history.pushState(null, "", hash);
+    lastHash = hash;
+  }
+  function replaceRoute(hash) {
+    if (window.location.hash !== hash) window.history.replaceState(null, "", hash);
+    lastHash = hash;
+  }
+  function validView(view) {
+    const tab = document.querySelector(`.tab[data-view="${view}"]`);
+    return tab && !tab.classList.contains("hidden") && VIEW_RENDERERS[view] ? view : "overview";
+  }
+
+  // Browser Back / Forward.
+  async function onPopState() {
+    if (!session.username) { lastHash = window.location.hash; return; }
+    const route = parseRoute();
+    const inRoadmap = session.roadmapId != null;
+    if (inRoadmap && !(route && route.id === session.roadmapId)) {
+      if (!(await settleUnsavedChanges("Leave"))) { // stay put and restore the URL
+        window.history.pushState(null, "", lastHash || "#/");
+        return;
+      }
+    }
+    lastHash = window.location.hash;
+    if (route && session.roadmapId === route.id) { setView(validView(route.view), { silent: true }); return; }
+    if (route) { openRoadmap(route.id, { view: route.view, push: false }); return; }
+    if (inRoadmap) {
+      resetRoadmapSession(null, 0);
+      progress = normalizeProgress(null);
+      closeModal();
+    }
     showDashboard();
   }
 
@@ -1976,16 +2193,33 @@
   // Roadmap dashboard (post-login landing page)
   // ---------------------------------------------------------
   let dashboardRoadmaps = [];
+  let stripsAnimated = false; // the strips fill in once per visit, not on every redraw
+  const MAX_ROADMAPS = 20;
 
   function hideDashboard() { $("dashboardScreen").classList.add("hidden"); }
 
+  function dashboardSkeleton() {
+    const card = `
+      <article class="roadmap-card is-skeleton" aria-hidden="true">
+        <span class="skeleton" style="height:22px;width:60%"></span>
+        <span class="skeleton" style="height:36px"></span>
+        <span class="skeleton" style="height:8px"></span>
+        <span class="skeleton" style="height:36px;margin-top:auto"></span>
+      </article>`;
+    return `
+      <div class="page-head"><div><h1 class="page-title">Roadmaps</h1><p class="page-lead">Loading your roadmaps…</p></div></div>
+      <div class="roadmap-grid">${card}${card}${card}</div>`;
+  }
+
   async function showDashboard() {
     closeAllMenus();
-    mountAccountMenu("dashboardAccountSlot");
-    lockApp();
+    closeCardMenus();
+    unlockApp();
+    setContext("home");
     document.title = "Roadmap Tracker";
+    $("roadmapScreen").classList.add("hidden");
     $("dashboardScreen").classList.remove("hidden");
-    $("dashboardContent").innerHTML = `<p class="dashboard-status">Loading your roadmaps…</p>`;
+    $("dashboardContent").innerHTML = dashboardSkeleton();
     let res;
     try {
       res = await window.RoadmapApi.list();
@@ -1993,8 +2227,8 @@
       if (e.status === 401) { handleSessionExpired(); return; }
       $("dashboardContent").innerHTML = `
         <div class="dashboard-status">
-          <p>Couldn't load your roadmaps: ${esc(e.message)}</p>
-          <button type="button" class="btn btn-primary" data-action="retry-dashboard">Retry</button>
+          <p>We couldn't load your roadmaps: ${esc(e.message)}</p>
+          <button type="button" class="btn btn-primary" data-action="retry-dashboard">Try again</button>
         </div>`;
       return;
     }
@@ -2009,46 +2243,458 @@
     return "Last activity " + days + " days ago";
   }
 
-  function renderDashboard(roadmaps) {
-    const cards = roadmaps.map((r) => `
-      <article class="roadmap-card">
-        <div>
-          <h3>${esc(r.name)}</h3>
-          ${r.description ? `<p class="roadmap-card-desc">${esc(r.description)}</p>` : ""}
-          <p class="roadmap-card-meta">${esc(describeActivity(r.lastActivityAt))}</p>
-        </div>
-        <div class="roadmap-card-actions">
-          <button type="button" class="btn btn-primary btn-open" data-action="open-roadmap" data-id="${r.id}">Open</button>
-          <button type="button" class="btn btn-ghost-danger" data-action="delete-roadmap" data-id="${r.id}"
-                  aria-label="Delete ${esc(r.name)}">Delete</button>
-        </div>
-      </article>`);
+  // ----- Month Strip data from a roadmap's server-side stats -----
+  function monthKeyOffset(startMonth, offset) {
+    const [y, m] = (startMonth || currentMonthKey()).split("-").map(Number);
+    return new Date(y, m - 1 + offset, 1);
+  }
+  // 0-based index of the current calendar month within the roadmap, or -1.
+  function currentMonthIndex(startMonth, count) {
+    const start = monthKeyOffset(startMonth, 0);
+    const idx = (TODAY.getFullYear() - start.getFullYear()) * 12 + (TODAY.getMonth() - start.getMonth());
+    return idx >= 0 && idx < count ? idx : -1;
+  }
+  function stripMonths(stats) {
+    const current = currentMonthIndex(stats.startMonth, stats.months.length);
+    return stats.months.map((m, i) => ({
+      label: monthKeyOffset(stats.startMonth, i).toLocaleDateString(undefined, { month: "short" }),
+      title: `Month ${m.number}: ${m.title || "Untitled"} (${m.completed} of ${m.total} tasks complete)`,
+      total: m.total, completed: m.completed, inProgress: m.inProgress, blocked: m.blocked,
+      current: i === current,
+    }));
+  }
+  const pctOf = (stats) => (stats && stats.total ? Math.round((stats.completed / stats.total) * 100) : 0);
 
-    // Offer the starter roadmap back whenever the account no longer has it.
-    const restore = roadmaps.some((r) => r.source === "builtin_ai_engineer") ? "" : `
-      <button type="button" class="roadmap-card action" data-action="restore-builtin">
-        <span class="action-title">↺ Restore AI Engineer Roadmap</span>
-        <span class="action-desc">Bring back the 10-month starter roadmap with fresh progress.</span>
+  function cardAction(stats) {
+    if (!stats) return "Open";
+    if (stats.total === 0) return "Build plan";
+    if (stats.completed === stats.total) return "Review";
+    return stats.completed + stats.inProgress + stats.blocked > 0 ? "Continue" : "Start";
+  }
+
+  function monthPosition(stats) {
+    if (!stats || !stats.months.length) return "";
+    const idx = currentMonthIndex(stats.startMonth, stats.months.length);
+    if (idx >= 0) return `Month ${idx + 1} of ${stats.months.length}`;
+    const start = monthKeyOffset(stats.startMonth, 0);
+    const before = TODAY < start;
+    const label = start.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+    return before ? `Starts ${label}` : `${stats.months.length} months`;
+  }
+
+  // ----- Home: saved preferences, filter, sort -----
+  const HOME_PREFS_KEY = "roadmap-dashboard:home";
+  const GETTING_STARTED_KEY = "roadmap-dashboard:getting-started";
+  const SORT_DEFAULT_DIR = { recent: "desc", name: "asc", progress: "desc" };
+  const STATUS_FILTERS = [["all", "All"], ["in_progress", "In progress"], ["not_started", "Not started"], ["completed", "Completed"]];
+  // View and sort are remembered; filter and search are not.
+  const homeState = { view: "grid", sortKey: "recent", sortDir: "desc", filter: "all", search: "" };
+
+  function loadHomePrefs() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(HOME_PREFS_KEY) || "null");
+      if (!saved) return;
+      if (saved.view === "grid" || saved.view === "list") homeState.view = saved.view;
+      if (SORT_DEFAULT_DIR[saved.sortKey]) {
+        homeState.sortKey = saved.sortKey;
+        homeState.sortDir = saved.sortDir === "asc" || saved.sortDir === "desc" ? saved.sortDir : SORT_DEFAULT_DIR[saved.sortKey];
+      }
+    } catch { /* storage blocked or unreadable: keep the defaults */ }
+  }
+  function saveHomePrefs() {
+    try {
+      localStorage.setItem(HOME_PREFS_KEY, JSON.stringify({ view: homeState.view, sortKey: homeState.sortKey, sortDir: homeState.sortDir }));
+    } catch { /* storage blocked: preferences last for this visit only */ }
+  }
+
+  // not_started | in_progress | completed, from the server-side stats.
+  function roadmapState(r) {
+    const s = r.stats;
+    if (!s || !s.total) return "not_started";
+    if (s.completed === s.total) return "completed";
+    return s.completed + s.inProgress + s.blocked > 0 ? "in_progress" : "not_started";
+  }
+  // Does deleting this roadmap throw away real work? (Notes or dates on an otherwise untouched roadmap do not count.)
+  function roadmapHasProgress(r) {
+    const s = r.stats;
+    if (!s) return false;
+    return s.completed + s.inProgress + s.blocked > 0 || (r.source !== BUILTIN_SOURCE && s.total > 0);
+  }
+
+  function sortRoadmaps(list) {
+    const dir = homeState.sortDir === "asc" ? 1 : -1;
+    const time = (r) => (r.lastActivityAt ? Date.parse(r.lastActivityAt) : -Infinity);
+    const compare = {
+      recent: (a, b) => {
+        const ta = time(a);
+        const tb = time(b);
+        if (ta === tb) return a.id - b.id;
+        return ta < tb ? -1 : 1;
+      },
+      name: (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id - b.id,
+      progress: (a, b) => (pctOf(a.stats) - pctOf(b.stats))
+        || ((a.stats ? a.stats.completed : 0) - (b.stats ? b.stats.completed : 0)) || a.id - b.id,
+    }[homeState.sortKey];
+    return list.slice().sort((a, b) => dir * compare(a, b));
+  }
+
+  function visibleRoadmaps() {
+    const q = homeState.search.trim().toLowerCase();
+    return sortRoadmaps(dashboardRoadmaps.filter((r) => (
+      (homeState.filter === "all" || roadmapState(r) === homeState.filter)
+      && (!q || r.name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q))
+    )));
+  }
+
+  // ----- Home: cards and table -----
+  function roadmapMenu(r) {
+    return `
+      <div class="rc-menu">
+        <button type="button" class="btn btn-ghost btn-icon btn-sm" data-menu-trigger aria-expanded="false"
+                aria-label="More actions for ${esc(r.name)}">${window.Icons.svg("more-horizontal", { size: 18 })}</button>
+        <div class="rc-menu-panel hidden" role="group" aria-label="Actions for ${esc(r.name)}">
+          <button type="button" class="profile-action-btn danger" data-action="delete-roadmap" data-id="${r.id}">Delete roadmap…</button>
+        </div>
+      </div>`;
+  }
+
+  function roadmapCard(r, animate) {
+    const s = r.stats;
+    const builtin = r.source === BUILTIN_SOURCE;
+    const progressBlock = !s ? "" : `
+      <div class="rc-progress">
+        ${window.MonthStrip.html(stripMonths(s), { size: "md", animate })}
+        <p class="rc-meta">
+          <span>${s.total ? `<strong>${pctOf(s)}%</strong> complete · ${s.completed} of ${s.total} tasks` : "No months yet. Add one to start."}</span>
+          <span>${esc(monthPosition(s))}</span>
+        </p>
+      </div>`;
+    return `
+      <article class="roadmap-card" data-id="${r.id}">
+        <div class="rc-head">
+          <h2 class="rc-title">${esc(r.name)}</h2>
+          <span class="badge rc-badge">${builtin ? "Built-in" : "Custom"}</span>
+          ${roadmapMenu(r)}
+        </div>
+        ${r.description ? `<p class="roadmap-card-desc">${esc(r.description)}</p>` : `<p class="roadmap-card-desc"></p>`}
+        ${progressBlock}
+        <div class="rc-foot">
+          <p class="roadmap-card-meta">${esc(describeActivity(r.lastActivityAt))}</p>
+          <button type="button" class="btn btn-primary" data-action="open-roadmap" data-id="${r.id}">${cardAction(s)}</button>
+        </div>
+      </article>`;
+  }
+
+  function activityShort(iso) {
+    if (!iso) return "Not started yet";
+    const days = daysBetween(new Date(iso), new Date());
+    if (days <= 0) return "Today";
+    if (days === 1) return "Yesterday";
+    return days + " days ago";
+  }
+
+  function sortHeader(key, label) {
+    const active = homeState.sortKey === key;
+    const aria = active ? (homeState.sortDir === "asc" ? "ascending" : "descending") : "none";
+    const arrow = active
+      ? `<span class="th-arrow${homeState.sortDir === "asc" ? " is-asc" : ""}">${window.Icons.svg("chevron-down", { size: 14 })}</span>` : "";
+    return `<th scope="col" aria-sort="${aria}"><button type="button" class="th-btn" data-action="sort-by" data-value="${key}">${label}${arrow}</button></th>`;
+  }
+
+  function roadmapTable(list) {
+    const rows = list.map((r) => {
+      const s = r.stats;
+      return `
+        <tr class="rt-row" data-id="${r.id}">
+          <td class="rt-name-cell">
+            <div class="rt-name">${esc(r.name)}</div>
+            ${r.description ? `<div class="rt-desc">${esc(r.description)}</div>` : ""}
+          </td>
+          <td class="col-type"><span class="badge rc-badge">${r.source === BUILTIN_SOURCE ? "Built-in" : "Custom"}</span></td>
+          <td class="rt-progress">
+            ${s ? `${window.MonthStrip.html(stripMonths(s), { size: "sm" })}<span class="rt-pct">${s.total ? pctOf(s) + "%" : "No months"}</span>` : ""}
+          </td>
+          <td class="col-month">${esc(monthPosition(s)) || "—"}</td>
+          <td class="col-activity">${esc(activityShort(r.lastActivityAt))}</td>
+          <td class="rt-actions">
+            <button type="button" class="btn btn-primary btn-sm" data-action="open-roadmap" data-id="${r.id}">${cardAction(s)}</button>
+            ${roadmapMenu(r)}
+          </td>
+        </tr>`;
+    }).join("");
+    return `
+      <div class="table-wrap">
+        <table class="rtable">
+          <thead><tr>
+            ${sortHeader("name", "Roadmap")}
+            <th scope="col" class="col-type">Type</th>
+            ${sortHeader("progress", "Progress")}
+            <th scope="col" class="col-month">Current month</th>
+            ${sortHeader("recent", "Last activity")}
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function summaryBar(roadmaps) {
+    const all = roadmaps.map((r) => r.stats).filter(Boolean);
+    const sum = (key) => all.reduce((n, s) => n + s[key], 0);
+    const total = sum("total");
+    const done = sum("completed");
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    return `
+      <section class="summary-bar" aria-label="Summary">
+        <div class="summary-item"><p class="summary-label">Roadmaps</p><p class="summary-value">${roadmaps.length}</p></div>
+        <div class="summary-item"><p class="summary-label">Tasks done</p><p class="summary-value">${done} <small>/ ${total}</small></p></div>
+        <div class="summary-item"><p class="summary-label">Overall progress</p><p class="summary-value">${pct}%</p></div>
+        <div class="summary-item"><p class="summary-label">Done this week</p><p class="summary-value">${sum("completedLast7Days")}</p></div>
+      </section>`;
+  }
+
+  // ----- Home: toolbar, view toggle -----
+  function viewToggle() {
+    const button = (value, icon, label) => `
+      <button type="button" class="view-btn" data-action="set-view" data-value="${value}" aria-pressed="false"
+              aria-label="${label}" title="${label}">${window.Icons.svg(icon, { size: 16 })}</button>`;
+    return `<div class="view-toggle" role="group" aria-label="Layout">${button("grid", "layout-grid", "Grid view")}${button("list", "list", "List view")}</div>`;
+  }
+
+  function homeToolbar() {
+    return `
+      <div class="home-toolbar">
+        <div class="home-search">
+          ${window.Icons.svg("search", { size: 16 })}
+          <input type="search" id="homeSearch" placeholder="Search roadmaps" aria-label="Search roadmaps" autocomplete="off" value="${esc(homeState.search)}" />
+        </div>
+        <div id="homeFilters" class="filter-bar" role="group" aria-label="Filter by status"></div>
+        <div class="home-sort">
+          <label for="homeSort">Sort by</label>
+          <select id="homeSort" class="select-filter">
+            <option value="recent">Recent activity</option>
+            <option value="name">Name</option>
+            <option value="progress">Progress</option>
+          </select>
+        </div>
+      </div>`;
+  }
+
+  // Redraws only what filtering/sorting changes, so the search box keeps focus while typing.
+  function renderHomeResults(animate) {
+    const host = $("homeResults");
+    if (!host) return;
+    const multi = dashboardRoadmaps.length >= 2;
+    const list = multi ? visibleRoadmaps() : dashboardRoadmaps.slice();
+    const view = multi ? homeState.view : "grid";
+
+    document.querySelectorAll(".view-btn").forEach((btn) => {
+      const on = btn.dataset.value === view;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", String(on));
+    });
+    const filters = $("homeFilters");
+    if (filters) {
+      const counts = { all: dashboardRoadmaps.length, in_progress: 0, not_started: 0, completed: 0 };
+      dashboardRoadmaps.forEach((r) => { counts[roadmapState(r)] += 1; });
+      filters.innerHTML = STATUS_FILTERS.map(([value, label]) => `
+        <button type="button" class="chip-filter${homeState.filter === value ? " active" : ""}" data-action="filter-status"
+                data-value="${value}" aria-pressed="${homeState.filter === value}">${label} <span class="chip-count">${counts[value]}</span></button>`).join("");
+    }
+    if ($("homeSort")) $("homeSort").value = homeState.sortKey;
+
+    if (!list.length) {
+      const q = homeState.search.trim();
+      host.innerHTML = `
+        <div class="empty-panel empty-panel-sm">
+          <h2>${q ? `No roadmaps match “${esc(q)}”.` : "No roadmaps in this view."}</h2>
+          <button type="button" class="btn" data-action="clear-filters">${q && homeState.filter === "all" ? "Clear search" : "Clear filters"}</button>
+        </div>`;
+    } else if (view === "list") {
+      host.innerHTML = roadmapTable(list);
+    } else {
+      host.innerHTML = `<div class="roadmap-grid">${list.map((r) => roadmapCard(r, animate)).join("")}</div>`;
+    }
+    const count = $("homeResultCount");
+    if (count) count.textContent = `${list.length} ${list.length === 1 ? "roadmap" : "roadmaps"} shown`;
+  }
+
+  // ----- Home: right-hand rail (Current focus, Getting started) -----
+  function focusRoadmap() {
+    const withMonths = dashboardRoadmaps.filter((r) => r.stats && r.stats.months.length);
+    if (!withMonths.length) return null;
+    const active = withMonths.filter((r) => r.lastActivityAt)
+      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
+    return active[0] || withMonths[0];
+  }
+
+  // The built-in roadmap's weekly sections follow 7-day blocks from the start of each month (days 1-28).
+  function builtinWeekFocus(monthIndex) {
+    const week = Math.floor((TODAY.getDate() - 1) / 7);
+    const phase = BUILTIN_DATA.phases[monthIndex];
+    if (week > 3 || !phase) return "";
+    const section = phase.sections.find((s) => s.type === "week" && s.weekNumber && (s.weekNumber - 1) % 4 === week);
+    return section ? section.title : "";
+  }
+
+  function focusCard() {
+    const r = focusRoadmap();
+    if (!r) return "";
+    const s = r.stats;
+    const idx = currentMonthIndex(s.startMonth, s.months.length);
+    let main;
+    let week = "";
+    if (idx >= 0) {
+      main = `Month ${s.months[idx].number}: ${s.months[idx].title || "Untitled"}`;
+      if (r.source === BUILTIN_SOURCE) week = builtinWeekFocus(idx);
+    } else {
+      const start = monthKeyOffset(s.startMonth, 0);
+      main = TODAY < start
+        ? `Starts ${start.toLocaleDateString(undefined, { month: "long", year: "numeric" })}`
+        : "The planned months have passed.";
+    }
+    return `
+      <section class="rail-card" aria-labelledby="focusHeading">
+        <h2 class="rail-title" id="focusHeading">Current focus</h2>
+        <p class="rail-sub">${esc(r.name)}</p>
+        <p class="rail-main">${esc(main)}</p>
+        ${week ? `<p class="rail-week">${esc(week)}</p>` : ""}
+        <button type="button" class="btn btn-primary btn-sm" data-action="open-roadmap" data-id="${r.id}">${cardAction(s)}</button>
+      </section>`;
+  }
+
+  function gettingStartedItems() {
+    const custom = dashboardRoadmaps.filter((r) => r.source !== BUILTIN_SOURCE);
+    return [
+      ["Complete your first task", dashboardRoadmaps.some((r) => r.stats && r.stats.completed > 0)],
+      ["Create a custom roadmap", custom.length > 0],
+      ["Add a month to your roadmap", custom.some((r) => r.stats && r.stats.months.length > 0)],
+      ["Choose an appearance", window.Theme.isSaved()],
+    ];
+  }
+
+  function gettingStartedCard() {
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(GETTING_STARTED_KEY) === "dismissed"; } catch { /* storage blocked */ }
+    const items = gettingStartedItems();
+    const done = items.filter(([, ok]) => ok).length;
+    if (dismissed || done === items.length) return "";
+    return `
+      <section class="rail-card" aria-labelledby="startedHeading">
+        <h2 class="rail-title" id="startedHeading">Getting started</h2>
+        <p class="rail-sub">${done} of ${items.length} done</p>
+        <ul class="rail-list">
+          ${items.map(([label, ok]) => `<li class="${ok ? "is-done" : ""}">${ok ? window.Icons.svg("check-circle", { size: 16 }) : '<span class="rail-dot" aria-hidden="true"></span>'}<span>${esc(label)}${ok ? '<span class="sr-only"> (done)</span>' : ""}</span></li>`).join("")}
+        </ul>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="dismiss-getting-started">Dismiss</button>
+      </section>`;
+  }
+
+  function homeRailHtml() {
+    return focusCard() + gettingStartedCard();
+  }
+
+  function renderDashboard(roadmaps) {
+    dashboardRoadmaps = roadmaps;
+    renderSidebarRoadmaps();
+    if (roadmaps.length < 2) { homeState.filter = "all"; homeState.search = ""; }
+    const hasBuiltin = roadmaps.some((r) => r.source === BUILTIN_SOURCE);
+    const atLimit = roadmaps.length >= MAX_ROADMAPS;
+    const newBtn = `
+      <button type="button" class="btn btn-primary" data-action="create-roadmap" ${atLimit ? `disabled title="You've reached the limit of ${MAX_ROADMAPS} roadmaps."` : ""}>
+        ${window.Icons.svg("plus", { size: 16 })} New roadmap
       </button>`;
 
-    $("dashboardContent").innerHTML = `
-      <h2>Your roadmaps</h2>
-      <p class="dashboard-lead">${roadmaps.length
-        ? "Pick up where you left off."
-        : "You don't have any roadmaps yet."}</p>
-      <div class="roadmap-grid">
-        ${cards.join("")}
-        ${restore}
-        <button type="button" class="roadmap-card action" data-action="create-roadmap">
-          <span class="action-title">+ Create new roadmap</span>
-          <span class="action-desc">Build your own plan: months, sections, topics and tasks.</span>
-        </button>
-        <button type="button" class="roadmap-card action" disabled>
-          <span class="action-title">✦ Create roadmap with AI <span class="coming-soon-badge">Coming soon</span></span>
-          <span class="action-desc">Describe a goal and let AI draft the plan.</span>
-        </button>
+    if (roadmaps.length === 0) {
+      $("dashboardContent").innerHTML = `
+        <div class="page-head"><div><h1 class="page-title">Roadmaps</h1></div></div>
+        <div class="empty-panel">
+          <h2>No roadmaps yet</h2>
+          <p>Start with the AI Engineer roadmap or build your own plan.</p>
+          <div class="page-actions">
+            <button type="button" class="btn btn-primary" data-action="restore-builtin">Restore AI Engineer roadmap</button>
+            <button type="button" class="btn" data-action="create-roadmap">Blank roadmap</button>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const restore = hasBuiltin ? "" : `
+      <div class="notice-row">
+        <span>The AI Engineer roadmap isn't in your account. You can bring it back with fresh progress.</span>
+        <button type="button" class="btn btn-sm" data-action="restore-builtin">Restore AI Engineer roadmap</button>
       </div>`;
-    dashboardRoadmaps = roadmaps;
+    const animate = !stripsAnimated;
+    stripsAnimated = true;
+    const multi = roadmaps.length >= 2;
+    const rail = homeRailHtml();
+
+    $("dashboardContent").innerHTML = `
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Roadmaps</h1>
+          <p class="page-lead">Track progress across your plans.</p>
+        </div>
+        <div class="page-actions">${multi ? viewToggle() : ""}${newBtn}</div>
+      </div>
+      ${restore}
+      <div class="home-layout${rail ? " has-rail" : ""}" id="homeLayout">
+        <div class="home-main">
+          ${summaryBar(roadmaps)}
+          ${multi ? homeToolbar() : ""}
+          <p id="homeResultCount" class="sr-only" role="status"></p>
+          <div id="homeResults"></div>
+        </div>
+        <aside class="home-rail" id="homeRail" aria-label="Focus and tips">${rail}</aside>
+      </div>`;
+    renderHomeResults(animate);
+  }
+
+  // Sidebar quick-switcher (Home only)
+  function renderSidebarRoadmaps() {
+    const host = $("sidebarRoadmapList");
+    if (!dashboardRoadmaps.length) { host.innerHTML = `<p class="nav-empty">No roadmaps yet.</p>`; return; }
+    host.innerHTML = dashboardRoadmaps.map((r) => `
+      <button type="button" class="nav-item nav-roadmap" data-action="open-roadmap" data-id="${r.id}" title="${esc(r.name)}">
+        <span class="nav-roadmap-top">
+          <span class="nav-roadmap-name">${esc(r.name)}</span>
+          ${r.stats ? `<span class="nav-roadmap-pct">${pctOf(r.stats)}%</span>` : ""}
+        </span>
+        ${r.stats ? window.MonthStrip.html(stripMonths(r.stats), { size: "sm" }) : ""}
+      </button>`).join("");
+  }
+
+  // Inside a roadmap, the strip is computed live from the open roadmap's data.
+  function renderSidebarStrip() {
+    const cur = currentPhase();
+    const months = allPhases().map((p) => {
+      const st = phaseStats(p.id);
+      return {
+        label: phaseStartDate(p.number).toLocaleDateString(undefined, { month: "short" }),
+        title: `Month ${p.number}: ${p.title} (${st.completed} of ${st.total} tasks complete)`,
+        total: st.total, completed: st.completed, inProgress: st.inProgress, blocked: st.blocked,
+        current: !!cur && cur.id === p.id,
+      };
+    });
+    $("sidebarStrip").innerHTML = window.MonthStrip.html(months, { size: "md" });
+  }
+
+  // Per-card overflow menu (Home)
+  function closeCardMenus() {
+    document.querySelectorAll(".rc-menu-panel").forEach((panel) => {
+      if (panel.classList.contains("hidden")) return;
+      panel.classList.add("hidden");
+      const trigger = panel.parentElement.querySelector("[data-menu-trigger]");
+      if (trigger) trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+  function toggleCardMenu(trigger) {
+    const panel = trigger.parentElement.querySelector(".rc-menu-panel");
+    const willOpen = panel.classList.contains("hidden");
+    closeCardMenus();
+    if (!willOpen) return;
+    panel.classList.remove("hidden");
+    trigger.setAttribute("aria-expanded", "true");
   }
 
   async function restoreBuiltinRoadmap() {
@@ -2063,37 +2709,75 @@
   }
 
   function openCreateRoadmapModal() {
-    const host = $("modalHost");
     const thisMonth = currentMonthKey();
-    host.querySelector(".modal").innerHTML = `
-      <h2>Create a new roadmap</h2>
+    const hasBuiltin = dashboardRoadmaps.some((r) => r.source === BUILTIN_SOURCE);
+    $("modalHost").querySelector(".modal").innerHTML = `
+      <h2>New roadmap</h2>
       <form id="createRoadmapForm" novalidate>
-        <div class="field">
-          <label for="newRoadmapName">Roadmap name</label>
-          <input type="text" id="newRoadmapName" maxlength="80" autocomplete="off" placeholder="e.g. Learn Rust in 12 weeks" />
+        <div class="option-list" role="radiogroup" aria-label="How do you want to start?">
+          <label class="option-row is-selected">
+            <input type="radio" name="newRoadmapKind" value="blank" checked />
+            <span class="option-body">
+              <span class="option-title">Blank roadmap</span>
+              <span class="option-desc">Build your own plan with months, sections, topics and tasks.</span>
+            </span>
+          </label>
+          <label class="option-row${hasBuiltin ? " is-disabled" : ""}">
+            <input type="radio" name="newRoadmapKind" value="builtin" ${hasBuiltin ? "disabled" : ""} />
+            <span class="option-body">
+              <span class="option-title">AI Engineer roadmap</span>
+              <span class="option-desc">${hasBuiltin ? "You already have this roadmap." : "The 10-month Production AI Engineer plan, restored with fresh progress."}</span>
+            </span>
+          </label>
+          <label class="option-row is-disabled" title="Coming soon: describe a goal and let AI draft the plan.">
+            <input type="radio" name="newRoadmapKind" value="ai" disabled />
+            <span class="option-body">
+              <span class="option-title">Describe a goal (AI) <span class="badge badge-soon">Soon</span></span>
+              <span class="option-desc">Describe a goal and let AI draft the plan.</span>
+            </span>
+          </label>
         </div>
-        <div class="field">
-          <label for="newRoadmapDesc">Description (optional)</label>
-          <textarea id="newRoadmapDesc" maxlength="300" placeholder="What is this plan for?"></textarea>
+
+        <div id="newBlankFields">
+          <div class="field">
+            <label for="newRoadmapName">Roadmap name</label>
+            <input type="text" id="newRoadmapName" maxlength="80" autocomplete="off" placeholder="e.g. Learn Rust in 12 weeks" />
+          </div>
+          <div class="field">
+            <label for="newRoadmapDesc">Description (optional)</label>
+            <textarea id="newRoadmapDesc" maxlength="300" placeholder="What is this plan for?" aria-describedby="newRoadmapCount"></textarea>
+            <p class="field-hint" id="newRoadmapCount">0 / 300</p>
+          </div>
+          <div class="field">
+            <label for="newRoadmapStart">Month 1 starts in</label>
+            <input type="month" id="newRoadmapStart" value="${esc(thisMonth)}" min="${esc(thisMonth)}" />
+          </div>
         </div>
-        <div class="field">
-          <label for="newRoadmapStart">Month 1 starts in</label>
-          <input type="month" id="newRoadmapStart" value="${esc(thisMonth)}" min="${esc(thisMonth)}" />
-        </div>
-        <p style="font-size:12px; color:var(--text-faint); margin:0 0 4px;">
-          Next you'll add months, sections, topics and tasks — laid out like the AI Engineer roadmap.
-        </p>
         <p id="createRoadmapError" class="auth-error" role="alert"></p>
         <div class="modal-actions">
           <button type="button" class="btn" data-action="close-modal">Cancel</button>
           <button type="submit" class="btn btn-primary" id="createRoadmapSubmit">Create roadmap</button>
         </div>
       </form>`;
-    host.classList.remove("hidden");
+    showModal();
     $("newRoadmapName").focus();
   }
 
+  // Show the blank-roadmap fields only for "Blank roadmap"; relabel the button for "AI Engineer roadmap".
+  function syncCreateKind() {
+    const checked = document.querySelector('input[name="newRoadmapKind"]:checked');
+    const kind = checked ? checked.value : "blank";
+    document.querySelectorAll(".option-row").forEach((row) => {
+      row.classList.toggle("is-selected", !!row.querySelector("input:checked"));
+    });
+    $("newBlankFields").classList.toggle("hidden", kind !== "blank");
+    $("createRoadmapSubmit").textContent = kind === "builtin" ? "Restore roadmap" : "Create roadmap";
+    $("createRoadmapError").textContent = "";
+  }
+
   async function submitCreateRoadmap() {
+    const checked = document.querySelector('input[name="newRoadmapKind"]:checked');
+    if (checked && checked.value === "builtin") { closeModal(); restoreBuiltinRoadmap(); return; }
     const error = $("createRoadmapError");
     const name = $("newRoadmapName").value.trim();
     const startMonth = $("newRoadmapStart").value;
@@ -2123,18 +2807,32 @@
   function confirmDeleteRoadmap(id) {
     const roadmap = dashboardRoadmaps.find((r) => String(r.id) === String(id));
     if (!roadmap) return;
-    const host = $("modalHost");
-    host.querySelector(".modal").innerHTML = `
+    const needsName = roadmapHasProgress(roadmap);
+    const s = roadmap.stats;
+    const trigger = document.querySelector(
+      `.roadmap-card[data-id="${roadmap.id}"] [data-menu-trigger], .rt-row[data-id="${roadmap.id}"] [data-menu-trigger]`,
+    );
+    $("modalHost").querySelector(".modal").innerHTML = `
       <h2>Delete “${esc(roadmap.name)}”?</h2>
-      <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
-        This permanently deletes the roadmap and all of its progress — statuses, notes, links, due dates
-        and anything you added. This can't be undone.
-      </p>
-      <div class="modal-actions">
-        <button class="btn" data-action="close-modal">Cancel</button>
-        <button class="btn btn-danger" data-action="confirm-delete-roadmap" data-id="${roadmap.id}">Delete roadmap</button>
-      </div>`;
-    host.classList.remove("hidden");
+      <form id="deleteRoadmapForm" novalidate>
+        <p class="dialog-text">
+          This permanently deletes the roadmap and all of its progress: statuses, notes, links, due dates
+          and anything you added. This can't be undone.${s && s.completed > 0 ? ` You have completed ${s.completed} of ${s.total} tasks.` : ""}
+        </p>
+        ${needsName ? `
+          <div class="field">
+            <label for="deleteConfirmName">Type the roadmap name to confirm</label>
+            <input type="text" id="deleteConfirmName" autocomplete="off" spellcheck="false" data-name="${esc(roadmap.name)}" />
+            <p class="field-hint">Type exactly: <strong>${esc(roadmap.name)}</strong></p>
+          </div>` : ""}
+        <div class="modal-actions">
+          <button type="button" class="btn" data-action="close-modal" id="deleteCancelBtn">Cancel</button>
+          <button type="button" class="btn btn-danger" data-action="confirm-delete-roadmap" data-id="${roadmap.id}"
+                  id="deleteConfirmBtn" ${needsName ? "disabled" : ""}>Delete roadmap</button>
+        </div>
+      </form>`;
+    showModal(trigger);
+    $("deleteCancelBtn").focus();
   }
 
   async function deleteRoadmap(id) {
@@ -2149,9 +2847,32 @@
     showDashboard();
   }
 
-  async function openRoadmap(id) {
+  // Shell with a skeleton while a roadmap loads (the sidebar and top bar stay put).
+  function showRoadmapLoading() {
+    hideAuth();
+    unlockApp();
+    setContext("roadmap");
+    $("dashboardScreen").classList.add("hidden");
+    $("roadmapScreen").classList.remove("hidden");
+    $("roadmapTitle").textContent = "Loading…";
+    $("roadmapSubtitle").textContent = "";
+    $("crumbRoadmapName").textContent = "Loading…";
+    $("sidebarStrip").innerHTML = "";
+    $("tabs").classList.add("is-loading");
+    $("main").innerHTML = `
+      <div aria-busy="true">
+        <span class="skeleton" style="height:28px;width:220px;margin-bottom:20px"></span>
+        <div class="grid grid-stats">
+          ${"<span class=\"skeleton\" style=\"height:92px\"></span>".repeat(4)}
+        </div>
+        <span class="skeleton" style="height:320px;margin-top:20px"></span>
+      </div>`;
+  }
+
+  async function openRoadmap(id, opts) {
+    const options = opts || {};
     hideDashboard();
-    showBlock("Loading roadmap…", "");
+    showRoadmapLoading();
     let res;
     try {
       res = await window.RoadmapApi.getProgress(id);
@@ -2159,8 +2880,8 @@
       if (e.status === 401) { showAuth("login"); return; }
       // Never fall through to an empty editable state: saving it would overwrite real data.
       showBlock("Couldn't load this roadmap", e.message, [
-        ["Retry", () => openRoadmap(id)],
-        ["Back to roadmaps", () => { hideAuth(); showDashboard(); }],
+        ["Try again", () => openRoadmap(id, options)],
+        ["Back to roadmaps", () => { hideAuth(); replaceRoute("#/"); showDashboard(); }],
       ]);
       return;
     }
@@ -2172,17 +2893,24 @@
     syncTabs();
     hideAuth();
     unlockApp();
+    setContext("roadmap");
+    $("tabs").classList.remove("is-loading");
     $("roadmapTitle").textContent = res.roadmap.name;
+    $("roadmapH1").textContent = res.roadmap.name;
     $("roadmapSubtitle").textContent = res.roadmap.description;
+    $("crumbRoadmapName").textContent = res.roadmap.name;
     document.title = res.roadmap.name + " — Roadmap Tracker";
     state.search = "";
     session.roadmapSource = res.roadmap.source;
     $("roadmapMenuName").textContent = res.roadmap.name;
     $("roadmapSearch").value = "";
     closeAllMenus();
-    mountAccountMenu("roadmapAccountSlot");
     setSaveStatus("saved");
-    setView("overview");
+    const view = validView(options.view || "overview");
+    setView(view, { silent: true });
+    if (options.push === false) replaceRoute(routeFor(res.roadmap.id, view));
+    else navigate(routeFor(res.roadmap.id, view));
+    window.scrollTo(0, 0);
     checkMilestones();
     if (res.data === null && res.roadmap.source === "builtin_ai_engineer" && readLegacyLocalData()) {
       openLegacyModal(false);
@@ -2219,20 +2947,71 @@
     resetRoadmapSession(null, 0);
     progress = normalizeProgress(null);
     closeModal();
+    navigate("#/");
     showDashboard();
   }
 
   function onDashboardClick(e) {
+    const trigger = e.target.closest("[data-menu-trigger]");
+    if (trigger) { e.stopPropagation(); toggleCardMenu(trigger); return; }
     const el = e.target.closest("[data-action]");
-    if (!el) return;
+    if (!el) {
+      // A click on the card or table row itself (not on one of its buttons) opens it.
+      const row = e.target.closest(".roadmap-card[data-id], .rt-row[data-id]");
+      if (row && !e.target.closest("button, a, .rc-menu")) openRoadmap(Number(row.dataset.id));
+      return;
+    }
+    closeCardMenus();
     switch (el.dataset.action) {
       case "open-roadmap": openRoadmap(Number(el.dataset.id)); break;
       case "delete-roadmap": confirmDeleteRoadmap(el.dataset.id); break;
       case "restore-builtin": restoreBuiltinRoadmap(); break;
       case "create-roadmap": openCreateRoadmapModal(); break;
       case "retry-dashboard": showDashboard(); break;
+      case "filter-status":
+        homeState.filter = el.dataset.value;
+        renderHomeResults(false);
+        break;
+      case "set-view":
+        homeState.view = el.dataset.value;
+        saveHomePrefs();
+        renderHomeResults(false);
+        break;
+      case "sort-by": {
+        const key = el.dataset.value;
+        homeState.sortDir = homeState.sortKey === key
+          ? (homeState.sortDir === "asc" ? "desc" : "asc") : SORT_DEFAULT_DIR[key];
+        homeState.sortKey = key;
+        saveHomePrefs();
+        renderHomeResults(false);
+        break;
+      }
+      case "clear-filters":
+        homeState.filter = "all";
+        homeState.search = "";
+        if ($("homeSearch")) $("homeSearch").value = "";
+        renderHomeResults(false);
+        break;
+      case "dismiss-getting-started":
+        try { localStorage.setItem(GETTING_STARTED_KEY, "dismissed"); } catch { /* storage blocked */ }
+        $("homeRail").innerHTML = homeRailHtml();
+        if (!$("homeRail").innerHTML.trim()) $("homeLayout").classList.remove("has-rail");
+        break;
       default: break;
     }
+  }
+
+  function onDashboardInput(e) {
+    if (e.target.id !== "homeSearch") return;
+    homeState.search = e.target.value;
+    renderHomeResults(false);
+  }
+  function onDashboardChange(e) {
+    if (e.target.id !== "homeSort") return;
+    homeState.sortKey = e.target.value;
+    homeState.sortDir = SORT_DEFAULT_DIR[e.target.value];
+    saveHomePrefs();
+    renderHomeResults(false);
   }
 
   function handleSessionExpired() {
@@ -2254,7 +3033,9 @@
   async function logout() {
     if (!(await settleUnsavedChanges("Log out"))) return;
     try { await window.AuthApi.logout(); } catch (e) { /* cookie may already be gone */ }
-    // A full reload drops every piece of in-memory, user-specific state.
+    // Forget the roadmap URL so the next person to log in starts at Home, then
+    // reload to drop every piece of in-memory, user-specific state.
+    window.history.replaceState(null, "", window.location.pathname);
     window.location.reload();
   }
 
@@ -2301,6 +3082,19 @@
     return function (...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
   }
 
+  // Decorative sample on the login brand panel (no real data).
+  function renderAuthPanelStrip() {
+    const sample = [
+      [100, 0, 0], [100, 0, 0], [62, 14, 0], [24, 10, 0], [0, 0, 0],
+      [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+    ];
+    const labels = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+    const months = sample.map(([completed, inProgress, blocked], i) => ({
+      label: labels[i], title: `Month ${i + 1}`, total: 100, completed, inProgress, blocked, current: i === 2,
+    }));
+    $("authPanelStrip").innerHTML = window.MonthStrip.html(months, { size: "lg", labels: true });
+  }
+
   function wireSyncEvents() {
     $("authForm").addEventListener("submit", submitAuth);
     $("authToggle").addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
@@ -2316,12 +3110,12 @@
         el.className = "auth-field-hint";
         return;
       }
-      el.textContent = "Checking…";
+      el.textContent = "Checking availability…";
       el.className = "auth-field-hint checking";
       try {
         const r = await window.AuthApi.checkUsername(val);
         if ($("authUsername").value.trim() !== val) return; // stale
-        el.textContent = r.available ? "✓ Available" : "✗ Already taken";
+        el.textContent = r.available ? "Username is available." : "That username is taken.";
         el.className = "auth-field-hint " + (r.available ? "available" : "taken");
       } catch { el.textContent = ""; el.className = "auth-field-hint"; }
     }, 400));
@@ -2334,18 +3128,50 @@
       const el  = $("authPasswordMatch");
       if (!pw || !cpw) { el.textContent = ""; el.className = "auth-field-hint"; return; }
       const match = pw === cpw;
-      el.textContent = match ? "✓ Passwords match" : "✗ Passwords do not match";
+      el.textContent = match ? "Passwords match." : "Passwords don't match.";
       el.className = "auth-field-hint " + (match ? "match" : "mismatch");
     }
-    $("authPassword").addEventListener("input", updatePasswordMatch);
+    $("authPassword").addEventListener("input", () => { updatePasswordMatch(); updatePasswordRules(); });
+    $("authPasswordToggle").addEventListener("click", () => {
+      setPasswordVisible($("authPassword").type === "password");
+    });
+    // Caps Lock hint on the password fields
+    ["authPassword", "authConfirmPassword"].forEach((id) => {
+      const field = $(id);
+      const check = (e) => {
+        if (typeof e.getModifierState !== "function") return;
+        $("authCapsHint").classList.toggle("hidden", !e.getModifierState("CapsLock"));
+      };
+      field.addEventListener("keydown", check);
+      field.addEventListener("keyup", check);
+      field.addEventListener("blur", () => $("authCapsHint").classList.add("hidden"));
+    });
     $("authConfirmPassword").addEventListener("input", updatePasswordMatch);
     $("logoutBtn").addEventListener("click", logout);
     $("backToDashboardBtn").addEventListener("click", backToDashboard);
     $("dashboardContent").addEventListener("click", onDashboardClick);
+    $("dashboardContent").addEventListener("input", onDashboardInput);
+    $("dashboardContent").addEventListener("change", onDashboardChange);
     $("modalHost").addEventListener("submit", (e) => {
-      if (e.target.id !== "createRoadmapForm") return;
-      e.preventDefault();
-      submitCreateRoadmap();
+      if (e.target.id === "createRoadmapForm") { e.preventDefault(); submitCreateRoadmap(); }
+      if (e.target.id === "deleteRoadmapForm") { // Enter in the name box
+        e.preventDefault();
+        const confirmBtn = $("deleteConfirmBtn");
+        if (!confirmBtn.disabled) deleteRoadmap(Number(confirmBtn.dataset.id));
+      }
+    });
+    $("modalHost").addEventListener("input", (e) => {
+      if (e.target.id === "newRoadmapDesc") $("newRoadmapCount").textContent = `${e.target.value.length} / 300`;
+      if (e.target.id === "deleteConfirmName") $("deleteConfirmBtn").disabled = e.target.value.trim() !== e.target.dataset.name;
+    });
+    $("modalHost").addEventListener("change", (e) => {
+      if (e.target.name === "newRoadmapKind") syncCreateKind();
+    });
+    // Escape closes the open dialog; Tab stays inside it.
+    document.addEventListener("keydown", (e) => {
+      if ($("modalHost").classList.contains("hidden")) return;
+      if (e.key === "Escape") { e.preventDefault(); closeModal(); }
+      else if (e.key === "Tab") trapModalFocus(e);
     });
     $("panelSaveStatus").addEventListener("click", () => {
       const kind = $("panelSaveStatus").dataset.kind;
@@ -2374,6 +3200,10 @@
     const footerYear = document.getElementById("authFooterYear");
     if (footerYear) footerYear.textContent = new Date().getFullYear();
     initTheme();
+    hydrateIcons();
+    initSidebar();
+    loadHomePrefs();
+    renderAuthPanelStrip();
     wireEvents();
     wireSyncEvents();
     boot();
