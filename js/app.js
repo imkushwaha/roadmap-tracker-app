@@ -6,6 +6,7 @@
 (function () {
   "use strict";
 
+  const BUILTIN_SOURCE = "builtin_ai_engineer";
   const BUILTIN_DATA = window.ROADMAP_DATA;
   // Custom roadmaps ship no curriculum: every month, section, topic and task
   // comes from the user's own additions (progress.custom).
@@ -1450,77 +1451,106 @@
   // ---------------------------------------------------------
   // Event wiring (delegated)
   // ---------------------------------------------------------
+  // Dropdown menus: one open at a time; outside click and Escape close them.
+  const menus = [];
+  const menuRefs = {};
+
+  function createMenu(trigger, panel, onOpen) {
+    const menu = {
+      anchor: trigger.parentElement,
+      isOpen: () => !panel.classList.contains("hidden"),
+      close(returnFocus) {
+        if (!menu.isOpen()) return;
+        panel.classList.add("hidden");
+        trigger.setAttribute("aria-expanded", "false");
+        if (returnFocus) trigger.focus();
+      },
+      open() {
+        closeAllMenus();
+        if (onOpen) onOpen();
+        panel.classList.remove("hidden");
+        trigger.setAttribute("aria-expanded", "true");
+      },
+    };
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (menu.isOpen()) menu.close(); else menu.open();
+    });
+    menus.push(menu);
+    return menu;
+  }
+
+  function closeAllMenus() { menus.forEach((m) => m.close()); }
+
+  // The single account menu lives in whichever header is on screen.
+  function mountAccountMenu(slotId) {
+    const slot = $(slotId);
+    const anchor = $("profileAnchor");
+    if (anchor.parentElement !== slot) slot.appendChild(anchor);
+  }
+
   function wireEvents() {
     document.getElementById("tabs").addEventListener("click", (e) => {
       const btn = e.target.closest(".tab");
       if (btn) setView(btn.dataset.view);
     });
 
-    // Profile panel toggle
-    const profileTrigger = document.getElementById("profileTrigger");
-    const profilePanel = document.getElementById("profilePanel");
-    const closePanel = () => {
-      profilePanel.classList.add("hidden");
-      profileTrigger.setAttribute("aria-expanded", "false");
-    };
-
-    profileTrigger.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const opening = profilePanel.classList.contains("hidden");
-      if (opening) {
-        document.getElementById("legacyImportBtn").classList.toggle("hidden", !readLegacyLocalData());
-      }
-      profilePanel.classList.toggle("hidden", !opening);
-      profileTrigger.setAttribute("aria-expanded", String(opening));
+    // Menus: account (profile) and roadmap settings
+    menuRefs.account = createMenu($("profileTrigger"), $("profilePanel"));
+    menuRefs.roadmap = createMenu($("roadmapMenuTrigger"), $("roadmapMenuPanel"), () => {
+      const canImportLegacy = session.roadmapSource === BUILTIN_SOURCE && !!readLegacyLocalData();
+      $("legacyImportBtn").classList.toggle("hidden", !canImportLegacy);
     });
     document.addEventListener("click", (e) => {
-      if (!profilePanel.classList.contains("hidden") &&
-          !document.getElementById("profileAnchor").contains(e.target)) {
-        closePanel();
-      }
+      menus.forEach((m) => { if (m.isOpen() && !m.anchor.contains(e.target)) m.close(); });
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const open = menus.find((m) => m.isOpen());
+      if (open) open.close(true);
     });
 
     // Theme
-    document.getElementById("themeLightBtn").addEventListener("click", () => {
+    $("themeLightBtn").addEventListener("click", () => {
       localStorage.setItem(THEME_KEY, "light");
       applyTheme("light");
     });
-    document.getElementById("themeDarkBtn").addEventListener("click", () => {
+    $("themeDarkBtn").addEventListener("click", () => {
       localStorage.setItem(THEME_KEY, "dark");
       applyTheme("dark");
     });
 
-    // Search (always visible inside profile panel)
-    const panelSearch = document.getElementById("panelSearch");
-    panelSearch.addEventListener("input", () => {
-      state.search = panelSearch.value;
+    // Search (tab bar, roadmap only)
+    const search = $("roadmapSearch");
+    search.addEventListener("input", () => {
+      state.search = search.value;
       rerender();
     });
 
-    // Data actions
-    document.getElementById("legacyImportBtn").addEventListener("click", () => {
-      closePanel();
+    // Roadmap settings actions
+    $("legacyImportBtn").addEventListener("click", () => {
+      menuRefs.roadmap.close();
       openLegacyModal(session.version > 0);
     });
-    document.getElementById("exportBtn").addEventListener("click", () => {
+    $("exportBtn").addEventListener("click", () => {
       exportProgress();
-      closePanel();
+      menuRefs.roadmap.close();
     });
-    document.getElementById("importBtn").addEventListener("click", () => {
-      document.getElementById("importFile").click();
-      closePanel();
+    $("importBtn").addEventListener("click", () => {
+      $("importFile").click();
+      menuRefs.roadmap.close();
     });
-    document.getElementById("importFile").addEventListener("change", (e) => {
+    $("importFile").addEventListener("change", (e) => {
       if (e.target.files[0]) importProgress(e.target.files[0]);
       e.target.value = "";
     });
-    document.getElementById("resetBtn").addEventListener("click", () => {
+    $("resetBtn").addEventListener("click", () => {
       confirmReset();
-      closePanel();
+      menuRefs.roadmap.close();
     });
-    document.getElementById("startMonthBtn").addEventListener("click", () => {
+    $("startMonthBtn").addEventListener("click", () => {
       openStartMonthModal();
-      closePanel();
+      menuRefs.roadmap.close();
     });
 
     document.getElementById("modalHost").addEventListener("click", (e) => {
@@ -1677,6 +1707,7 @@
   const session = {
     username: null,     // set while authenticated; persist() is a no-op without it
     roadmapId: null,    // the open roadmap; null while on the dashboard
+    roadmapSource: null, // its source ("builtin_ai_engineer" | "custom")
     version: 0,         // server version our copy is based on
     dirty: false,       // local changes not yet confirmed saved
     saving: false,      // a PUT is in flight
@@ -1696,7 +1727,7 @@
   };
   function setSaveStatus(kind, detail) {
     const el = $("panelSaveStatus");
-    el.className = "profile-panel-save " + kind;
+    el.className = "save-status " + kind;
     el.textContent = SAVE_LABELS[kind];
     el.title = detail || "";
     el.dataset.kind = kind;
@@ -1922,7 +1953,7 @@
   // Reset every piece of per-roadmap sync state; the account fields are kept.
   function resetRoadmapSession(roadmapId, version) {
     clearTimeout(session.timer);
-    Object.assign(session, { roadmapId, version, dirty: false, saving: false,
+    Object.assign(session, { roadmapId, roadmapSource: null, version, dirty: false, saving: false,
       conflict: false, conflictServer: null, retries: 0, expiredFor: null });
   }
 
@@ -1937,7 +1968,6 @@
     $("profileName").textContent = fullName;
     $("panelFullName").textContent = fullName;
     $("panelUsername").textContent = "@" + user.username;
-    $("dashboardGreeting").textContent = "Signed in as " + fullName;
     hideAuth();
     showDashboard();
   }
@@ -1950,6 +1980,8 @@
   function hideDashboard() { $("dashboardScreen").classList.add("hidden"); }
 
   async function showDashboard() {
+    closeAllMenus();
+    mountAccountMenu("dashboardAccountSlot");
     lockApp();
     document.title = "Roadmap Tracker";
     $("dashboardScreen").classList.remove("hidden");
@@ -2144,7 +2176,11 @@
     $("roadmapSubtitle").textContent = res.roadmap.description;
     document.title = res.roadmap.name + " — Roadmap Tracker";
     state.search = "";
-    $("panelSearch").value = "";
+    session.roadmapSource = res.roadmap.source;
+    $("roadmapMenuName").textContent = res.roadmap.name;
+    $("roadmapSearch").value = "";
+    closeAllMenus();
+    mountAccountMenu("roadmapAccountSlot");
     setSaveStatus("saved");
     setView("overview");
     checkMilestones();
@@ -2204,6 +2240,7 @@
     clearTimeout(session.timer);
     session.expiredFor = session.username;
     session.username = null;
+    closeAllMenus();
     setSaveStatus("idle");
     closeModal();
     showAuth("login",
@@ -2303,7 +2340,6 @@
     $("authPassword").addEventListener("input", updatePasswordMatch);
     $("authConfirmPassword").addEventListener("input", updatePasswordMatch);
     $("logoutBtn").addEventListener("click", logout);
-    $("dashboardLogoutBtn").addEventListener("click", logout);
     $("backToDashboardBtn").addEventListener("click", backToDashboard);
     $("dashboardContent").addEventListener("click", onDashboardClick);
     $("modalHost").addEventListener("submit", (e) => {
