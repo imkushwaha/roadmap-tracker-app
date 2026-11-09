@@ -1,4 +1,5 @@
 node_modules/
+.claude/settings.local.json
 .env
 # SQLite database (+ WAL/SHM sidecar files) — never commit user data
 data/*.db

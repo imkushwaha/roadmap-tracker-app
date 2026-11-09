@@ -106,6 +106,10 @@ function _applyStaticRoutes(app, staticRoot) {
   app.get("/data/roadmap.js", file("data/roadmap.js"));
   app.use("/css", express.static(path.join(staticRoot, "css")));
   app.use("/js", express.static(path.join(staticRoot, "js")));
+  // Self-hosted fonts and the logo/favicon. Fonts never change for a given file
+  // name, so let browsers cache them for a year.
+  app.use("/fonts", express.static(path.join(staticRoot, "fonts"), { maxAge: "365d", immutable: true }));
+  app.use("/img", express.static(path.join(staticRoot, "img")));
 }
 
 /**

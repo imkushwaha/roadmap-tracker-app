@@ -33,7 +33,9 @@ the authenticated account. "Create with AI" is shown as "Coming soon".
 ```
 roadmap-dashboard/
 ├── index.html                  SPA shell — auth screen, roadmap dashboard, and views rendered into <main id="main">
-├── css/styles.css              All styles; light/dark theme via CSS vars
+├── css/                        tokens.css (design tokens, light/dark), base.css, components.css,
+│                               styles.css (layout + views, shrinking). See documentation/design-system.md
+├── fonts/ img/                 Self-hosted IBM Plex Sans; logo + favicon
 │
 ├── js/
 │   ├── app.js                  ~2.2k-line IIFE — dashboard, views, auth UI, sync
@@ -105,7 +107,7 @@ Browser (index.html)
 Express 5 server (:3000)
   ├── /api/auth/*   → server/routes/auth.js
   ├── /api/roadmaps → server/routes/roadmaps.js
-  └── static        → index.html, css/, js/, data/roadmap.js  (allowlist only)
+  └── static        → index.html, css/, js/, fonts/, img/, data/roadmap.js  (allowlist only)
          │  @libsql/client (async)
 Turso (hosted libSQL)
   ├── users            (id, username, password_hash, first_name, last_name, created_at)
@@ -114,7 +116,7 @@ Turso (hosted libSQL)
 ```
 
 ### Static file security
-The server NEVER serves its project root wholesale. An explicit allowlist in `server/app.js:_applyStaticRoutes` exposes only: `index.html`, `css/*`, `js/*`, `data/roadmap.js`. The local `data/app.db`, `.env`, `server/`, and `node_modules/` are unreachable.
+The server NEVER serves its project root wholesale. An explicit allowlist in `server/app.js:_applyStaticRoutes` exposes only: `index.html`, `css/*`, `js/*`, `fonts/*`, `img/*`, `data/roadmap.js`. The local `data/app.db`, `.env`, `server/`, and `node_modules/` are unreachable.
 
 ---
 
@@ -203,7 +205,7 @@ registration and the restore endpoint.
 ### `server/routes/roadmaps.js`
 HTTP only — it parses/validates and delegates all SQL to the repository. `router.use(requireAuth)`; every
 query is scoped to `req.user.id`, and a malformed, unknown or foreign `:id` is a 404.
-- `GET /api/roadmaps` — the user's roadmaps with `lastActivityAt` (the progress row's `updated_at`, or `null`)
+- `GET /api/roadmaps` — the user's roadmaps with `lastActivityAt` (the progress row's `updated_at`, or `null`) and `stats` (progress summary from `js/roadmap-stats.js`, cached by roadmap id + version in `server/roadmaps/stats.js`)
 - `POST /api/roadmaps` — two modes. **Custom** (`source` omitted or `"custom"`): `{ name, description?, startMonth? }` →
   201 `{ roadmap }`; with a `startMonth` the first progress row (empty progress + `settings.startMonth`, version 1) is
   written in the same transaction; 400 on invalid input; 409 at the 20-roadmap cap. **Restore**
@@ -313,7 +315,7 @@ subtitle (`#roadmapTitle`, `#roadmapSubtitle`) from the roadmap.
 `flushSave()` calls `RoadmapApi.putProgress(session.roadmapId, progress, session.version)`. On 409, opens a conflict modal.
 
 **Profile panel** — dropdown from header trigger. Contains: full name + username display, search,
-theme toggle (light/dark), start-month setting, export/import JSON, legacy localStorage import,
+theme toggle (Light / Dark / System via `window.Theme`, `js/theme-boot.js`), start-month setting, export/import JSON, legacy localStorage import,
 reset, logout.
 
 **Custom content** — users can add custom topics (attached to a section) and custom phases

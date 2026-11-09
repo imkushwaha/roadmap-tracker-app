@@ -1,0 +1,76 @@
+/* ===========================================================
+   Base — fonts, reset, typography, focus, motion preferences.
+   Loaded after tokens.css, before components.css.
+   =========================================================== */
+
+/* IBM Plex Sans, self-hosted (SIL Open Font License, see fonts/LICENSE-OFL.txt).
+   Latin subset only; the stack in --font falls back to system fonts. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url("../fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal; font-weight: 500; font-display: swap;
+  src: url("../fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal; font-weight: 600; font-display: swap;
+  src: url("../fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.43;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.01em; }
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; }
+.hidden { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* Numbers line up in columns (counts, percentages, dates). */
+.stat-value, .progress-pct, .topic-progress, .badge, .status-chip, .due-tag,
+.roadmap-card-meta, .stat-sub { font-variant-numeric: tabular-nums; }
+
+.skip-link {
+  position: absolute; left: -999px; top: 0;
+  background: var(--accent); color: var(--accent-ink);
+  padding: 8px 14px; border-radius: 0 0 8px 0; z-index: 999;
+}
+.skip-link:focus { left: 0; }
+
+/* Keyboard focus: one ring, everywhere, never for mouse clicks. */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible {
+  outline-offset: 0;
+}
+
+::selection { background: var(--accent-soft); color: var(--text); }
+
+/* Respect the operating-system "reduce motion" setting. The confetti canvas is
+   hidden too; celebrate() in app.js shows a toast instead. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  #confettiCanvas { display: none !important; }
+}

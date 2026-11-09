@@ -333,11 +333,24 @@ describe("static serving", () => {
     assert.equal((await c.get("/js/app.js")).status, 200);
     assert.equal((await c.get("/js/progress-schema.js")).status, 200);
     assert.equal((await c.get("/data/roadmap.js")).status, 200);
-    for (const p of ["/data/app.db", "/data/app.db-wal", "/data/roadmap.md", "/server/app.js", "/server/db.js",
+    for (const p of ["/css/tokens.css", "/css/base.css", "/css/components.css", "/js/theme-boot.js", "/js/icons.js",
+                     "/img/logo.svg", "/img/favicon.svg", "/fonts/ibm-plex-sans-latin-400-normal.woff2"]) {
+      assert.equal((await c.get(p)).status, 200, p);
+    }
+    for (const p of ["/fonts/", "/fonts/../.env", "/img/../package.json", "/data/app.db", "/data/app.db-wal", "/data/roadmap.md", "/server/app.js", "/server/db.js",
                      "/.env", "/.env.example", "/package.json", "/node_modules/express/package.json", "/test/api.test.js"]) {
       assert.equal((await c.get(p)).status, 404, p);
     }
     assert.equal((await c.get("/js/..%2fserver/app.js")).status, 404);
+  });
+
+  test("fonts are cacheable; the page forbids inline scripts", async () => {
+    const font = await client(srv.base).get("/fonts/ibm-plex-sans-latin-400-normal.woff2");
+    assert.match(font.headers.get("cache-control"), /max-age=31536000/);
+    const page = await client(srv.base).get("/");
+    const csp = page.headers.get("content-security-policy");
+    assert.match(csp, /script-src 'self'/);
+    assert.doesNotMatch(csp.split(";").find((d) => d.trim().startsWith("script-src")), /unsafe-inline/);
   });
 
   test("API responses are not cacheable", async () => {
